@@ -1,4 +1,4 @@
-// package.json check koro:
+
 {
   "name": "minecraft-discord-bot",
   "version": "1.0.0",
@@ -11,3 +11,4 @@
     "express": "^4.18.2"
   }
 }
+
