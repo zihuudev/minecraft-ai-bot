@@ -97,7 +97,7 @@ function buildPremiumEmbed({ title, description, fields = [], imageUrl = null, s
   if (style === 'classic') {
     e.setAuthor({ name: '🔧 Cyberland Update (Classic)' });
   } else {
-    e.setAuthor({ name: '🚀 Cyberland Premium Update' });
+    e.setAuthor({ name: '🚀 Cyberland Ai Update' });
   }
   if (fields.length) e.addFields(...fields);
   if (imageUrl) e.setImage(imageUrl);
@@ -183,7 +183,7 @@ async function startUpdateFlow(initiator = 'dashboard', durationMinutes = 0) {
     { name: 'Estimated duration', value: state.update.durationMinutes ? `${state.update.durationMinutes} minutes` : 'Manual (no auto finish)', inline: true },
     { name: 'Server', value: mc.online ? (mc.motd || 'Online') : 'Offline', inline: false }
   ];
-  const startMsg = await sendPremiumEveryone(channel, { title: 'Automatic Update — Started', description: `Initiated by **${initiator}**.`, fields, style: 'premium', color: 0x00b894, footer: 'Cyberland Bot' });
+  const startMsg = await sendPremiumEveryone(channel, { title: 'Automatic Update — Started', description: `Initiated by **${initiator}**.`, fields, style: 'premium', color: 0x00b894, footer: 'Developed By Zihuu' });
   if (startMsg) state.update.startMsgId = startMsg.id;
 
   // cleanup messages but preserve startMsgId and any pinned messages
@@ -222,7 +222,7 @@ async function finishUpdateFlow(initiator = 'dashboard') {
     { name: 'Chat', value: '🔓 Unlocked', inline: true },
     { name: 'Server', value: mc.online ? (mc.motd || 'Online') : 'Offline', inline: false }
   ];
-  const finishMsg = await sendPremiumEveryone(channel, { title: 'Automatic Update — Completed', description: `Finished by **${initiator}**.`, fields, style: 'premium', color: 0x2ecc71, footer: 'Cyberland Bot' });
+  const finishMsg = await sendPremiumEveryone(channel, { title: 'Automatic Update — Completed', description: `Finished by **${initiator}**.`, fields, style: 'premium', color: 0x2ecc71, footer: 'Developed By Zihuu' });
   if (finishMsg) state.update.finishMsgId = finishMsg.id;
 
   // unlock channel
@@ -333,7 +333,7 @@ cron.schedule('5 15 * * *', async () => {
 // ----------------- DISCORD message handling -----------------
 client.on('ready', () => {
   emitLog(`Discord logged in as ${client.user.tag}`);
-  try { client.user.setActivity('Cyberland • Premium', { type: ActivityType.Playing }); } catch(e){}
+  try { client.user.setActivity('Cyberland Ai', { type: ActivityType.Playing }); } catch(e){}
 });
 
 client.on('messageCreate', async (msg) => {
@@ -583,3 +583,4 @@ server.listen(PORT, () => emitLog(`Dashboard running at http://localhost:${PORT}
     process.exit(1);
   }
 })();
+
