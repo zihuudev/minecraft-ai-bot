@@ -1,7 +1,7 @@
+// package.json check koro:
 {
   "name": "minecraft-discord-bot",
   "version": "1.0.0",
-  "description": "Advanced Minecraft Discord Bot with Dashboard",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
@@ -9,8 +9,5 @@
   "dependencies": {
     "discord.js": "^14.14.1",
     "express": "^4.18.2"
-  },
-  "engines": {
-    "node": "18.x"
   }
 }
