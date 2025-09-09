@@ -246,7 +246,7 @@ pre{background:rgba(255,255,255,.06);padding:12px;border-radius:12px;overflow:au
 <div class="container">
   <div class="topbar">
     <h1>CYBERLAND AI DASHBOARD
-      <span id="autoState" class="badge">Auto: ...</span>
+      <span id="autoState" class="badge">Auto Update: ...</span>
       <span id="aiState" class="badge">AI: ...</span>
       <span id="updState" class="badge">Update: idle</span>
     </h1>
@@ -642,4 +642,5 @@ client.login(DISCORD_TOKEN);
 const server = express();
 server.use((req, res, next) => app(req, res, next));
 server.listen(PORT, () => console.log(`🌐 Dashboard running on PORT ${PORT}`));
+
 
