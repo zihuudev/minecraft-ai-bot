@@ -25,13 +25,13 @@ const client = new Client({
     ],
 });
 
-// === AI Chat ===
+// === AI Chat Function ===
 async function askOpenAI(prompt) {
     try {
         const response = await axios.post(
             "https://api.openai.com/v1/chat/completions",
             {
-                model: "gpt-3.5-turbo",
+                model: "gpt-4o-mini", // ✅ বেশি দ্রুত এবং সঠিক
                 messages: [{ role: "user", content: prompt }],
                 temperature: 0.7,
                 max_tokens: 500,
@@ -44,10 +44,19 @@ async function askOpenAI(prompt) {
                 timeout: 30000,
             }
         );
-        return response.data.choices[0].message.content.trim();
+
+        if (
+            response.data &&
+            response.data.choices &&
+            response.data.choices.length > 0
+        ) {
+            return response.data.choices[0].message.content.trim();
+        } else {
+            return "⚠️ AI থেকে কোনো উত্তর আসেনি। পরে আবার চেষ্টা করুন।";
+        }
     } catch (error) {
         console.error("OpenAI Error:", error.response?.data || error.message);
-        return "⚠️ AI সার্ভার এখন ডাউন আছে। কিছুক্ষণ পর চেষ্টা করুন।";
+        return "⚠️ AI সার্ভার বর্তমানে অনুপলব্ধ। পরে আবার চেষ্টা করুন।";
     }
 }
 
@@ -143,7 +152,8 @@ setInterval(getStatus, 10000);
 
 // === Routes ===
 app.get("/", (req, res) => {
-    if (!req.session.loggedIn) return res.send(`<form method='POST' action='/login'><input type='password' name='password'><button type='submit'>Login</button></form>`);
+    if (!req.session.loggedIn)
+        return res.send(`<form method='POST' action='/login'><input type='password' name='password'><button type='submit'>Login</button></form>`);
     res.send(dashboardHTML);
 });
 
@@ -174,7 +184,6 @@ app.post("/api/start-update", async (req, res) => {
         const { minutes } = req.body;
         const channel = await client.channels.fetch(CHANNEL_ID);
 
-        // Lock channel & delete all messages
         await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: false });
         await clearChannelMessages(channel);
 
@@ -182,13 +191,12 @@ app.post("/api/start-update", async (req, res) => {
             .setColor("#ff2d55")
             .setTitle("🚀 Cyberland Bot Updating...")
             .setDescription(`⚡ **Bot Maintenance Started**\n⏳ Duration: **${minutes} minutes**\n\nPlease wait while we upgrade the system...`)
-            .setImage("https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZWZnc2JpN3U1ZTIzZXdtZzFnd3lsZXRnaXBycW1wbnA4ZXdxOG9qaiZlcD12MV9pbnRlcm5hbF9naWZzX2dpZmlfYnlfaWQ&rid=200.gif") // Premium GIF
+            .setImage("https://i.imgur.com/Lr9F1jE.gif") // Premium GIF
             .setFooter({ text: "Cyberland Premium Bot" })
             .setTimestamp();
 
         await channel.send({ content: "@everyone", embeds: [embed] });
 
-        // Schedule finish automatically after given minutes
         if (manualUpdateTimeout) clearTimeout(manualUpdateTimeout);
         manualUpdateTimeout = setTimeout(async () => {
             await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: true });
