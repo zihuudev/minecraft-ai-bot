@@ -165,10 +165,10 @@ app.post("/api/start-update", async (req, res) => {
         const channel = await client.channels.fetch(CHANNEL_ID);
         await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: false });
         const embed = new EmbedBuilder()
-            .setColor("Gold")
+            .setColor("#ff9800")
             .setTitle("🚀 Manual Update Started")
-            .setDescription(`Bot is under maintenance for **${minutes} minutes**!`)
-            .setFooter({ text: "Cyberland Bot" })
+            .setDescription(`**Bot Maintenance Mode**\n⏳ Duration: **${minutes} minutes**`)
+            .setFooter({ text: "Cyberland Premium Bot" })
             .setTimestamp();
         await channel.send({ content: "@everyone", embeds: [embed] });
 
@@ -176,10 +176,10 @@ app.post("/api/start-update", async (req, res) => {
         manualUpdateTimeout = setTimeout(async () => {
             await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: true });
             const finishEmbed = new EmbedBuilder()
-                .setColor("Green")
+                .setColor("#4caf50")
                 .setTitle("✅ Manual Update Finished")
-                .setDescription("Bot update completed successfully!")
-                .setFooter({ text: "Cyberland Bot" })
+                .setDescription("Bot is **back online**! 🚀")
+                .setFooter({ text: "Cyberland Premium Bot" })
                 .setTimestamp();
             await channel.send({ content: "@everyone", embeds: [finishEmbed] });
         }, minutes * 60000);
@@ -196,10 +196,10 @@ app.post("/api/finish-update", async (req, res) => {
         const channel = await client.channels.fetch(CHANNEL_ID);
         await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: true });
         const embed = new EmbedBuilder()
-            .setColor("Green")
+            .setColor("#4caf50")
             .setTitle("✅ Update Finished")
-            .setDescription("Bot update completed successfully!")
-            .setFooter({ text: "Cyberland Bot" })
+            .setDescription("Bot update completed successfully! 🚀")
+            .setFooter({ text: "Cyberland Premium Bot" })
             .setTimestamp();
         await channel.send({ content: "@everyone", embeds: [embed] });
         res.json({ success: true });
@@ -229,10 +229,10 @@ cron.schedule("0 15 * * *", async () => {
     const channel = await client.channels.fetch(CHANNEL_ID);
     await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: false });
     const embed = new EmbedBuilder()
-        .setColor("Orange")
+        .setColor("#f59e0b")
         .setTitle("⚡ Auto Update Started")
         .setDescription("Bot updating automatically...")
-        .setFooter({ text: "Cyberland Bot" })
+        .setFooter({ text: "Cyberland Premium Bot" })
         .setTimestamp();
     await channel.send({ content: "@everyone", embeds: [embed] });
 }, { timezone: "Asia/Dhaka" });
@@ -242,10 +242,10 @@ cron.schedule("5 15 * * *", async () => {
     const channel = await client.channels.fetch(CHANNEL_ID);
     await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: true });
     const embed = new EmbedBuilder()
-        .setColor("Green")
+        .setColor("#4caf50")
         .setTitle("✅ Auto Update Finished")
-        .setDescription("Bot is back online!")
-        .setFooter({ text: "Cyberland Bot" })
+        .setDescription("Bot is back online! 🚀")
+        .setFooter({ text: "Cyberland Premium Bot" })
         .setTimestamp();
     await channel.send({ content: "@everyone", embeds: [embed] });
 }, { timezone: "Asia/Dhaka" });
@@ -253,26 +253,18 @@ cron.schedule("5 15 * * *", async () => {
 // === Discord AI Chat ===
 client.on("messageCreate", async (message) => {
     if (message.author.bot || message.channel.id !== CHANNEL_ID) return;
+
     await message.channel.sendTyping();
+    const reply = await askOpenAI(`${message.author.username}: ${message.content}`);
 
     const embed = new EmbedBuilder()
         .setColor("#06b6d4")
-        .setTitle("🤖 Cyberland AI")
-        .setDescription("Thinking...")
+        .setTitle("🤖 Cyberland AI Reply")
+        .setDescription(reply)
         .setFooter({ text: "Powered by GPT-3.5 Turbo" })
         .setTimestamp();
-    const thinkingMsg = await message.reply({ embeds: [embed] });
 
-    const reply = await askOpenAI(`${message.author.username}: ${message.content}`);
-
-    const finalEmbed = new EmbedBuilder()
-        .setColor("#22c55e")
-        .setTitle("✨ Cyberland AI Response")
-        .setDescription(reply)
-        .setFooter({ text: "Cyberland Premium Bot" })
-        .setTimestamp();
-
-    thinkingMsg.edit({ embeds: [finalEmbed] });
+    message.reply({ embeds: [embed] });
 });
 
 // === Ready Event ===
