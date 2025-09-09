@@ -1,9 +1,10 @@
-// ===================== Cyberland Ultra-Premium Bot (Single File) =====================
-// Upgrades you asked: (1) Best-in-class AI (friendlier, smarter, robust) (2) Ultra-premium
-// animated dashboard. Everything else unchanged: update flow, purge/lock/unlock, embeds,
-// auto-update 3:00–3:05 BD, admin slash cmds, Minecraft live status, 3-user login.
+// ================= Cyberland Ultra-Premium Bot (Single File) =================
+// Features: Ultra-premium animated dashboard + login (3 users), resilient AI,
+// manual & auto update with instant purge/lock/unlock + premium embeds, Minecraft
+// Bedrock live status, autorole, admin-only slash commands, and command refresh.
+// Timezone: Asia/Dhaka (Auto update 3:00–3:05 PM daily)
 // Developed by Zihuu
-// =====================================================================================
+// ============================================================================
 
 require("dotenv").config();
 const express = require("express");
@@ -31,7 +32,7 @@ const DISCORD_TOKEN = process.env.DISCORD_TOKEN || "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const CHANNEL_ID = process.env.CHANNEL_ID || ""; // AI chat channel
-const GUILD_ID = process.env.GUILD_ID || "";     // for fast guild-scoped slash cmds
+const GUILD_ID = process.env.GUILD_ID || "";     // to deploy slash cmds instantly for one guild
 
 // Minecraft (Bedrock)
 const MINECRAFT_IP = "play.cyberland.pro";
@@ -87,25 +88,14 @@ async function lockChannel(channel, locked) {
   });
 }
 
-// ====== AI (Upgraded) ======
+// ====== AI (Upgraded, resilient) ======
 async function chatOpenAI(messages, attempt = 1) {
   if (!OPENAI_API_KEY) return "❌ OpenAI key is missing on the server.";
   try {
     const res = await axios.post(
       "https://api.openai.com/v1/chat/completions",
-      {
-        model: OPENAI_MODEL,
-        messages,
-        temperature: 0.65,
-        max_tokens: 800,
-        presence_penalty: 0.05,
-      },
-      {
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
-        timeout: 60_000,
-        httpsAgent,
-        validateStatus: () => true,
-      }
+      { model: OPENAI_MODEL, messages, temperature: 0.65, max_tokens: 800, presence_penalty: 0.05 },
+      { headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, timeout: 60_000, httpsAgent, validateStatus: () => true }
     );
     if (res.status >= 200 && res.status < 300) {
       return res.data?.choices?.[0]?.message?.content?.trim() || "I'm here!";
@@ -127,16 +117,14 @@ async function chatOpenAI(messages, attempt = 1) {
 
 function buildContext(userId, username, userMsg) {
   const history = userContexts.get(userId) || [];
-  // system prompt = friendlier, Minecraft-savvy, concise, robust
   const sys = {
     role: "system",
     content:
       "You are a friendly, helpful assistant for a Minecraft/Discord community named Cyberland. " +
-      "Answer concisely, naturally, and with practical steps. If asked about Minecraft, give commands, versions, and tips. " +
-      "Avoid long monologues unless user asks. Keep answers clear and helpful.",
+      "Answer concisely and clearly. When asked about Minecraft, give useful commands, versions, ports, and tips. " +
+      "Avoid long monologues unless the user asks. Be accurate and practical.",
   };
   const msgs = [sys];
-
   for (const turn of history.slice(-MAX_TURNS)) {
     msgs.push({ role: "user", content: `${username}: ${turn.q}` });
     msgs.push({ role: "assistant", content: turn.a });
@@ -152,32 +140,22 @@ function saveContext(userId, q, a) {
   userContexts.set(userId, history);
 }
 
-// smooth typing simulation
+// smooth typing simulation + chunking (keeps replies snappy)
 async function typeAndReply(message, text) {
   const chunks = [];
   const words = text.split(/\s+/);
   let buf = "";
   for (const w of words) {
-    const candidate = (buf ? buf + " " : "") + w;
-    if (candidate.length >= 160) { // send chunk
-      chunks.push(buf);
-      buf = w;
-    } else {
-      buf = candidate;
-    }
+    const cand = (buf ? buf + " " : "") + w;
+    if (cand.length >= 180) { chunks.push(buf); buf = w; } else { buf = cand; }
   }
   if (buf) chunks.push(buf);
 
-  // simulate typing between chunks
   let first = true;
   for (const c of chunks) {
     await message.channel.sendTyping();
-    if (first) {
-      await message.reply(c);
-      first = false;
-    } else {
-      await message.channel.send(c);
-    }
+    if (first) { await message.reply(c); first = false; }
+    else { await message.channel.send(c); }
     await new Promise(r => setTimeout(r, Math.min(900, Math.max(200, c.length * 5))));
   }
 }
@@ -194,8 +172,8 @@ function ultraEmbed(colorHex, title, desc) {
 function updatingEmbed({ minutes, reason, auto }) {
   const e = ultraEmbed(
     0xf59e0b,
-    auto ? "⚡ Automatic Update Started" : "🚀 Update Started",
-    "We’re performing maintenance to keep the bot ultra-fast, stable, and secure."
+    auto ? "⚡ Automatic Update Started" : "🚀 Manual Update Started",
+    "We are performing maintenance to keep the bot ultra-fast, stable, and secure."
   );
   e.addFields(
     { name: "🎉 Status", value: "Updating in progress…", inline: true },
@@ -210,7 +188,7 @@ function updatingEmbed({ minutes, reason, auto }) {
 function updatedEmbed({ auto }) {
   const e = ultraEmbed(
     0x22c55e,
-    auto ? "✅ Automatic Update Completed" : "✅ Update Completed",
+    auto ? "✅ Automatic Update Completed" : "✅ Manual Update Completed",
     "All systems are up to date. You can chat now!"
   );
   e.addFields(
@@ -226,7 +204,13 @@ function updatedEmbed({ auto }) {
 const app = express();
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(session({ secret: "cyberland-ultra-session", resave: false, saveUninitialized: true }));
+app.use(
+  session({
+    secret: "cyberland-ultra-session",
+    resave: false,
+    saveUninitialized: true,
+  })
+);
 
 // Fixed 3-user login
 const USERS = new Map([
@@ -333,6 +317,7 @@ pre{background:rgba(255,255,255,.06);padding:12px;border-radius:12px;overflow:au
       <button class="btn-green" onclick="finishUpdate()">✅ Finish Update</button>
       <button class="btn-amber" onclick="toggleAuto()">🔄 Toggle Auto Update</button>
       <button class="btn-cyan" onclick="toggleAI()">🤖 Toggle AI</button>
+      <button class="btn-red" onclick="refreshCmds()">🔁 Refresh Slash Commands</button>
     </div>
     <p style="opacity:.9;margin-top:10px">Countdown: <b id="countdown" class="count pulse">—</b></p>
   </div>
@@ -362,7 +347,7 @@ pre{background:rgba(255,255,255,.06);padding:12px;border-radius:12px;overflow:au
 const tabs=[...document.querySelectorAll(".tab")];
 tabs.forEach(t=>t.onclick=()=>{
   tabs.forEach(x=>x.classList.remove("active")); t.classList.add("active");
-  document.querySelectorAll(".card").forEach(c=>c.classList.add("hidden"));
+  document.querySelectorAll(".card").forEach((c,i)=>{ if(i===0) return; c.classList.add("hidden"); });
   document.getElementById("tab-"+t.dataset.tab).classList.remove("hidden");
 });
 function setBadge(el,id,on){el.textContent=id+": "+(on?"ON":"OFF"); el.previousElementSibling.style.background=on?"#22c55e":"#ef4444"; el.style.borderColor=on?"rgba(34,197,94,.5)":"rgba(239,68,68,.5)";}
@@ -382,6 +367,7 @@ async function finishUpdate(){ await fetch('/api/finish-update',{method:'POST'})
 async function toggleAuto(){ const r=await fetch('/api/toggle-auto',{method:'POST'}).then(r=>r.json()); badges(); alert('Auto Update: '+(r.autoUpdate?'ON':'OFF')); }
 async function toggleAI(){ const r=await fetch('/api/toggle-ai',{method:'POST'}).then(r=>r.json()); badges(); alert('AI: '+(r.aiEnabled?'ON':'OFF')); }
 async function saveAutorole(){ const roleId=document.getElementById('roleId').value.trim(); const r=await fetch('/api/autorole',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({roleId})}).then(r=>r.json()); alert(r.success?'Saved.':'Failed.'); }
+async function refreshCmds(){ const r=await fetch('/api/refresh-commands',{method:'POST'}).then(r=>r.json()); alert(r.ok?'Commands refreshed.':'Failed.'); }
 async function pollStatus(){ const d=await fetch('/api/server-status').then(r=>r.json()); const el=document.getElementById('mcStatus'); el.classList.remove('pulse'); el.textContent=d.online?('🟢 Online — Players: '+d.players+' | Ping: '+d.ping+'ms'):'🔴 Offline'; }
 async function tick(){
   const s = await fetch('/api/update-state').then(r=>r.json());
@@ -591,6 +577,12 @@ async function deployCommands(attempt = 1) {
   }
 }
 
+// refresh via dashboard
+app.post("/api/refresh-commands", requireAuth, async (_req,res)=>{
+  try { await deployCommands(); return res.json({ ok:true }); }
+  catch(e){ console.error("refresh-commands:", e.message); return res.json({ ok:false, error:e.message }); }
+});
+
 // interactions
 client.on("interactionCreate", async (i) => {
   if (!i.isChatInputCommand()) return;
@@ -676,7 +668,7 @@ client.on("interactionCreate", async (i) => {
 
     } else if (i.commandName === "minecraft") {
       try {
-        const st = await mcu.statusBedrock("${MINECRAFT_IP}", ${MINECRAFT_PORT}, { timeout: 4000 });
+        const st = await mcu.statusBedrock(MINECRAFT_IP, MINECRAFT_PORT, { timeout: 4000 });
         const e = ultraEmbed(0x22c55e, "🎮 Minecraft Status", `🟢 Online\nPlayers: ${st.players.online}\nPing: ${st.roundTripLatency}ms`);
         await i.reply({ embeds:[e], ephemeral:true });
       } catch {
@@ -699,7 +691,7 @@ client.on("guildMemberAdd", async (member) => {
   } catch(e){ console.error("autorole:", e.message); }
 });
 
-// AI chat (normal text replies) in CHANNEL_ID — upgraded with context + typing simulation
+// AI chat (normal text replies) in CHANNEL_ID — context + typing simulation
 let aiQueue = Promise.resolve();
 client.on("messageCreate", async (message) => {
   try {
@@ -719,7 +711,7 @@ client.on("messageCreate", async (message) => {
 });
 
 // ====== Slash deploy on ready ======
-async function deployCommands(attempt = 1) {
+async function deployCommandsOnce(attempt = 1) {
   const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
   const appId = client?.user?.id;
   if (!appId) throw new Error("ClientNotReady");
@@ -735,11 +727,14 @@ async function deployCommands(attempt = 1) {
     console.error("Deploy error:", e.message);
     if (attempt < 3) {
       await new Promise(r => setTimeout(r, 1500 * attempt));
-      return deployCommands(attempt + 1);
+      return deployCommandsOnce(attempt + 1);
     }
     throw e;
   }
 }
+
+// alias used by dashboard refresh endpoint
+async function deployCommands(){ return deployCommandsOnce(); }
 
 client.on("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
