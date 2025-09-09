@@ -1,3 +1,7 @@
+// ===================== Premium Cyberland Bot — All-in-One =====================
+// Developed by Zihuu (footer across UI). Single-file, Railway/Render ready.
+// ============================================================================
+
 require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
@@ -24,7 +28,7 @@ const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const CHANNEL_ID = process.env.CHANNEL_ID;
-const GUILD_ID = process.env.GUILD_ID || ""; // guild deploy = instant
+const GUILD_ID = process.env.GUILD_ID || "";
 
 // Minecraft Bedrock
 const MINECRAFT_IP = "play.cyberland.pro";
@@ -41,100 +45,33 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message, Partials.GuildMember],
 });
 
-// ====== State ======
-let autoUpdate = true;
-let aiEnabled = true;
-let autoroleId = null;
-let manualUpdateTimer = null;
-const owoStats = new Map(); // userId -> count
+// ====== Runtime State ======
+let autoUpdate = true;         // daily 3:00–3:05 PM BD
+let aiEnabled = true;          // AI chat toggle
+let autoroleId = null;         // saved via dashboard or /autorole
+let manualUpdateTimer = null;  // setTimeout handle
+let updateState = {            // live countdown for dashboard
+  active: false,
+  auto: false,
+  reason: "",
+  startedAt: 0,
+  endsAt: 0,       // epoch ms
+  minutes: 0
+};
 
-// ====== OpenAI (resilient, friendly tone) ======
-const httpsAgent = new https.Agent({ keepAlive: true });
-const RETRYABLE = new Set([408, 409, 429, 500, 502, 503, 504]);
+const owoStats = new Map();    // simple in-memory counter
 
-async function chatOpenAI(messages, attempt = 1) {
-  try {
-    const res = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: OPENAI_MODEL,
-        messages,
-        temperature: 0.7,
-        max_tokens: 700,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        httpsAgent,
-        timeout: 75_000,
-        validateStatus: () => true,
-      }
-    );
-    if (res.status >= 200 && res.status < 300) {
-      const text = res.data?.choices?.[0]?.message?.content?.trim();
-      return text || "I'm here!";
-    }
-    if (res.status === 401) return "❌ Invalid OpenAI API Key. Check your .env.";
-    if (RETRYABLE.has(res.status) && attempt < 3) {
-      await new Promise(r => setTimeout(r, 800 * attempt));
-      return chatOpenAI(messages, attempt + 1);
-    }
-    return "⚠️ AI service is temporarily unavailable. Please try again.";
-  } catch (e) {
-    if (["ECONNABORTED", "ETIMEDOUT", "ECONNRESET"].includes(e.code) && attempt < 3) {
-      await new Promise(r => setTimeout(r, 800 * attempt));
-      return chatOpenAI(messages, attempt + 1);
-    }
-    return "⚠️ AI service is temporarily unavailable. Please try again.";
-  }
+// ====== Utilities ======
+function isAdmin(member) {
+  return member?.permissions?.has(PermissionsBitField.Flags.Administrator);
 }
-function askAI(user, text) {
-  const sys = {
-    role: "system",
-    content:
-      "You are a helpful, friendly assistant like ChatGPT-4. Be concise, clear, and kind. Avoid markdown tables unless asked. If asked about Minecraft, give accurate, actionable tips.",
-  };
-  return chatOpenAI([sys, { role: "user", content: `${user}: ${text}` }]);
-}
-
-// ====== Premium Embeds ======
-function updatingEmbed({ minutes, reason, auto = false }) {
-  return new EmbedBuilder()
-    .setColor("#8B5CF6")
-    .setTitle(auto ? "⚡ Auto Update — In Progress" : "🚀 Update — In Progress")
-    .setDescription(
-      [
-        "We’re performing a premium maintenance to keep everything smooth.",
-        reason ? `🛠️ **Reason:** ${reason}` : "🛠️ **Reason:** Routine improvements",
-        `⏳ **Estimated Duration:** ${minutes} minute(s)`,
-        "🔒 Channel is temporarily locked.",
-      ].join("\n")
-    )
-    .addFields(
-      { name: "Status", value: "Updating…", inline: true }
-    )
-    .setFooter({ text: "Developed by Zihuu • Cyberland Premium Bot" })
-    .setTimestamp();
-}
-function updatedEmbed({ auto = false }) {
-  return new EmbedBuilder()
-    .setColor("#22C55E")
-    .setTitle(auto ? "✅ Auto Update — Completed" : "✅ Update Completed")
-    .setDescription("All systems are online. Channel is unlocked. Have fun!")
-    .addFields({ name: "Status", value: "Online", inline: true })
-    .setFooter({ text: "Developed by Zihuu • Cyberland Premium Bot" })
-    .setTimestamp();
-}
-
-// ====== Helpers ======
 async function purgeChannel(channel) {
   try {
     let fetched;
     do {
       fetched = await channel.messages.fetch({ limit: 100 });
       if (fetched.size > 0) {
+        // bulkDelete misses messages older than 14 days; fall back to single delete
         await channel.bulkDelete(fetched, true).catch(() => {});
         for (const [, msg] of fetched) await msg.delete().catch(() => {});
       }
@@ -148,8 +85,90 @@ async function lockChannel(channel, locked) {
     SendMessages: locked ? false : true,
   });
 }
-function isAdmin(member) {
-  return member.permissions.has(PermissionsBitField.Flags.Administrator);
+function fmtEta(ms) {
+  if (ms <= 0) return "now";
+  const m = Math.floor(ms / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+// ====== OpenAI (friendly ChatGPT-style, resilient) ======
+const httpsAgent = new https.Agent({ keepAlive: true });
+const RETRYABLE = new Set([408, 409, 429, 500, 502, 503, 504]);
+
+async function chatOpenAI(messages, attempt = 1) {
+  try {
+    const res = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      { model: OPENAI_MODEL, messages, temperature: 0.7, max_tokens: 700 },
+      {
+        headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
+        httpsAgent,
+        timeout: 75_000,
+        validateStatus: () => true,
+      }
+    );
+    if (res.status >= 200 && res.status < 300) {
+      return res.data?.choices?.[0]?.message?.content?.trim() || "I'm here!";
+    }
+    if (res.status === 401) return "❌ Invalid OpenAI API Key. Check your .env.";
+    if (RETRYABLE.has(res.status) && attempt < 3) {
+      await new Promise(r => setTimeout(r, 900 * attempt));
+      return chatOpenAI(messages, attempt + 1);
+    }
+    return "⚠️ AI service is temporarily unavailable. Please try again.";
+  } catch (e) {
+    if (["ECONNABORTED", "ETIMEDOUT", "ECONNRESET"].includes(e.code) && attempt < 3) {
+      await new Promise(r => setTimeout(r, 900 * attempt));
+      return chatOpenAI(messages, attempt + 1);
+    }
+    return "⚠️ AI service is temporarily unavailable. Please try again.";
+  }
+}
+function askAI(user, text) {
+  const sys = {
+    role: "system",
+    content:
+      "You are a helpful, friendly assistant like ChatGPT-4. Be concise, warm, and accurate. If asked about Minecraft, give practical tips and command examples.",
+  };
+  return chatOpenAI([sys, { role: "user", content: `${user}: ${text}` }]);
+}
+
+// ====== Premium Embeds (screenshot-style) ======
+function banner(color, title) {
+  return new EmbedBuilder().setColor(color).setTitle(title).setTimestamp().setFooter({
+    text: "Developed by Zihuu • Cyberland Premium Bot",
+  });
+}
+function updatingEmbed({ minutes, reason, auto = false }) {
+  // emulate your screenshot: fields with icons + short body
+  const e = banner("#F59E0B", auto ? "⚡ Automatic Update Started" : "🚀 Update Started");
+  e.setDescription("Please wait while we perform a premium maintenance to keep everything smooth.");
+  e.addFields(
+    { name: "🎉 Status", value: "Bot is updating…", inline: true },
+    { name: "🔒 Chat", value: "Locked", inline: true },
+    { name: "⚡ Server Performance", value: "Fast", inline: true },
+    { name: "⏰ Next update", value: `in ${minutes} minutes`, inline: true },
+    { name: "🧠 Update system", value: auto ? "Runs automatically" : "Manual maintenance", inline: true },
+    { name: "⚙️ Frequency", value: auto ? "Daily at 3:00 PM" : `One-time (${minutes}m)`, inline: true },
+  );
+  if (reason) e.addFields({ name: "🛠️ Reason", value: reason });
+  return e;
+}
+function updatedEmbed({ auto = false, completedAtText }) {
+  const e = banner("#22C55E", auto ? "✅ Automatic Update Completed" : "✅ Update Completed");
+  e.setDescription("You can now use the bot!");
+  e.addFields(
+    { name: "🎉 Status", value: "Bot is ready to use", inline: true },
+    { name: "🔓 Chat", value: "Unlocked", inline: true },
+    { name: "⚡ Server Performance", value: "Fast", inline: true },
+    { name: "⏰ Next update", value: auto ? "Tomorrow 3:00 PM" : "—", inline: true },
+    { name: "🧠 Update system", value: auto ? "Active and running automatically" : "Manual complete", inline: true },
+    { name: "⚙️ Frequency", value: auto ? "Every day" : "—", inline: true },
+  );
+  if (completedAtText) e.setFooter({ text: `Developed by Zihuu • ${completedAtText}` });
+  return e;
 }
 
 // ====== Dashboard (ultra-premium glass) ======
@@ -160,7 +179,6 @@ app.use(
   session({ secret: "cyberland-dashboard-secret", resave: false, saveUninitialized: true })
 );
 
-// login page
 const loginHTML = `<!doctype html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Login • Cyberland</title>
@@ -168,7 +186,8 @@ const loginHTML = `<!doctype html><html><head><meta charset="utf-8"/>
 :root{--bg:#0a0f1d;--glass:rgba(255,255,255,.06);--border:rgba(255,255,255,.12);--text:#e5e7eb;--vio:#7c3aed;--cyan:#06b6d4}
 *{box-sizing:border-box}body{margin:0;height:100vh;display:grid;place-items:center;background:
 radial-gradient(900px 600px at 10% 10%,#112046 0%,#0a0f1d 55%,#080c16 100%);color:var(--text);font-family:Inter,ui-sans-serif,system-ui}
-.card{width:95%;max-width:420px;background:var(--glass);border:1px solid var(--border);border-radius:18px;padding:26px;backdrop-filter:blur(8px);box-shadow:0 10px 40px rgba(0,0,0,.35)}
+.card{width:95%;max-width:420px;background:var(--glass);border:1px solid var(--border);border-radius:18px;padding:26px;backdrop-filter:blur(8px);box-shadow:0 10px 40px rgba(0,0,0,.35);animation:float 8s ease-in-out infinite}
+@keyframes float{0%{transform:translateY(0)}50%{transform:translateY(-6px)}100%{transform:translateY(0)}}
 h1{margin:0 0 14px;font-size:22px}
 .input{width:100%;padding:12px;border:none;border-radius:12px;background:rgba(255,255,255,.08);color:#fff;outline:none}
 .btn{width:100%;margin-top:12px;padding:12px 14px;border:none;border-radius:12px;color:#fff;cursor:pointer;background:linear-gradient(135deg,var(--vio),var(--cyan))}
@@ -205,6 +224,7 @@ button:hover{transform:translateY(-1px);filter:brightness(1.06)}
 .btn-green{background:var(--green)}.btn-amber{background:var(--amber);color:#111}.btn-cyan{background:var(--cyan)}.btn-red{background:var(--red)}
 .kv{opacity:.85;font-size:13px}.badge{display:inline-block;padding:6px 10px;border-radius:999px;font-size:12px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);margin-left:8px}
 .hidden{display:none}hr{border:none;height:1px;background:var(--border);margin:16px 0}
+#countdown{font-weight:700}
 pre{background:rgba(255,255,255,.06);padding:12px;border-radius:12px;overflow:auto;max-height:260px}
 </style></head>
 <body>
@@ -212,6 +232,7 @@ pre{background:rgba(255,255,255,.06);padding:12px;border-radius:12px;overflow:au
   <h1>⚡ Cyberland Premium Dashboard
     <span id="autoState" class="badge">Auto Update: ...</span>
     <span id="aiState" class="badge">AI: ...</span>
+    <span id="updState" class="badge">Update: idle</span>
   </h1>
   <div class="tabs">
     <div class="tab active" data-tab="updates">Updates</div>
@@ -229,8 +250,9 @@ pre{background:rgba(255,255,255,.06);padding:12px;border-radius:12px;overflow:au
       <button class="btn-prim" onclick="startUpdate()">🚀 Start Update</button>
       <button class="btn-green" onclick="finishUpdate()">✅ Finish Update</button>
       <button class="btn-amber" onclick="toggleAuto()">🔄 Toggle Auto Update</button>
+      <button class="btn-cyan" onclick="toggleAI()">🤖 Toggle AI</button>
     </div>
-    <p class="kv">Start → Purge + Lock + @everyone + Premium Embed • Finish → Purge + Unlock + @everyone • Auto: 3:00–3:05 PM (Asia/Dhaka)</p>
+    <p class="kv">Live countdown: <span id="countdown">—</span></p>
   </div>
 
   <div id="tab-server" class="card hidden">
@@ -258,10 +280,10 @@ pre{background:rgba(255,255,255,.06);padding:12px;border-radius:12px;overflow:au
 
   <div id="tab-settings" class="card hidden">
     <h3>AI Settings</h3>
-    <button class="btn-amber" onclick="toggleAI()">🔁 Toggle AI</button>
     <p class="kv">AI replies in the configured channel as normal messages (no embeds).</p>
   </div>
 </div>
+
 <script>
 const tabs=[...document.querySelectorAll(".tab")];
 tabs.forEach(t=>t.onclick=()=>{
@@ -280,16 +302,27 @@ async function startUpdate(){
   const reason=document.getElementById('reason').value||"";
   if(!minutes||minutes<1) return alert('Enter minutes (>=1)');
   await fetch('/api/start-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({minutes,reason})});
-  alert('Update started.');
 }
-async function finishUpdate(){ await fetch('/api/finish-update',{method:'POST'}); alert('Update finished.'); }
+async function finishUpdate(){ await fetch('/api/finish-update',{method:'POST'}); }
 async function toggleAuto(){ const r=await fetch('/api/toggle-auto',{method:'POST'}).then(r=>r.json()); alert('Auto Update is now '+(r.autoUpdate?'ON':'OFF')); badges(); }
 async function toggleAI(){ const r=await fetch('/api/toggle-ai',{method:'POST'}).then(r=>r.json()); alert('AI is now '+(r.aiEnabled?'ON':'OFF')); badges(); }
 async function saveAutorole(){ const roleId=document.getElementById('roleId').value.trim(); const r=await fetch('/api/autorole',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({roleId})}).then(r=>r.json()); alert(r.success?'Autorole saved.':'Failed to save.'); }
 async function pollStatus(){ const d=await fetch('/api/server-status').then(r=>r.json()); document.getElementById('mcStatus').innerText=d.online?('🟢 Online — Players: '+d.players+' | Ping: '+d.ping+'ms'):'🔴 Offline'; }
 async function refreshCommands(){ const gid=document.getElementById('guildOverride').value.trim(); await fetch('/api/refresh-commands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({guildId:gid||null})}); alert('Slash commands refresh requested.'); previewCommands(); }
 async function previewCommands(){ const gid=document.getElementById('guildOverride').value.trim(); const data=await fetch('/api/commands'+(gid?('?guildId='+gid):'')).then(r=>r.json()).catch(()=>({error:'Fetch failed'})); document.getElementById('cmdList').textContent=JSON.stringify(data,null,2); }
-badges(); pollStatus(); setInterval(pollStatus,10000); setTimeout(previewCommands,700);
+badges(); pollStatus(); setInterval(pollStatus,10000);
+
+// Live countdown (no refresh)
+async function tick(){
+  const s = await fetch('/api/update-state').then(r=>r.json());
+  const cd = document.getElementById('countdown');
+  const badge = document.getElementById('updState');
+  if(!s.active){ cd.textContent='—'; badge.textContent='Update: idle'; return; }
+  const left = s.endsAt - Date.now();
+  cd.textContent = left>0 ? (Math.floor(left/60000)+'m '+Math.floor((left%60000)/1000)+'s') : 'finishing…';
+  badge.textContent = 'Update: '+(s.auto?'auto':'manual');
+}
+setInterval(tick, 1000); setTimeout(tick, 200);
 </script>
 </body></html>`;
 
@@ -307,6 +340,7 @@ app.post("/login", (req, res) => {
 
 // state endpoints
 app.get("/api/state", (_req, res) => res.json({ autoUpdate, aiEnabled, autoroleId }));
+app.get("/api/update-state", (_req, res) => res.json(updateState));
 app.post("/api/toggle-ai", (_req, res) => { aiEnabled = !aiEnabled; res.json({ aiEnabled }); });
 app.post("/api/toggle-auto", (_req, res) => { autoUpdate = !autoUpdate; res.json({ autoUpdate }); });
 app.post("/api/autorole", (req, res) => { autoroleId = (req.body.roleId || "").trim() || null; res.json({ success: true, autoroleId }); });
@@ -321,39 +355,57 @@ app.get("/api/server-status", async (_req, res) => {
   }
 });
 
-// manual update
+// ====== Manual Update API (instant, countdown, completion) ======
+async function startUpdateFlow({ minutes, reason, auto }) {
+  const ch = await client.channels.fetch(CHANNEL_ID);
+
+  // set state immediately for dashboard
+  const now = Date.now();
+  updateState = {
+    active: true, auto, reason,
+    startedAt: now,
+    endsAt: now + minutes * 60_000,
+    minutes
+  };
+
+  await purgeChannel(ch);
+  await lockChannel(ch, true);
+  await ch.send({ content: "@everyone", embeds: [updatingEmbed({ minutes, reason, auto })] });
+
+  if (manualUpdateTimer) clearTimeout(manualUpdateTimer);
+  manualUpdateTimer = setTimeout(async () => {
+    await finishUpdateFlow({ auto });
+  }, minutes * 60_000);
+}
+
+async function finishUpdateFlow({ auto }) {
+  const ch = await client.channels.fetch(CHANNEL_ID);
+  await purgeChannel(ch);
+  await lockChannel(ch, false);
+  const timeText = `Today at ${moment().tz("Asia/Dhaka").format("h:mm A")}`;
+  await ch.send({ content: "@everyone", embeds: [updatedEmbed({ auto, completedAtText: timeText })] });
+
+  updateState = { active: false, auto: false, reason: "", startedAt: 0, endsAt: 0, minutes: 0 };
+  if (manualUpdateTimer) clearTimeout(manualUpdateTimer);
+}
+
 app.post("/api/start-update", async (req, res) => {
   try {
     const minutes = Math.max(1, Number(req.body.minutes || 1));
     const reason = (req.body.reason || "").toString().slice(0, 1000);
-    const ch = await client.channels.fetch(CHANNEL_ID);
-
-    await purgeChannel(ch);
-    await lockChannel(ch, true);
-    await ch.send({ content: "@everyone", embeds: [updatingEmbed({ minutes, reason, auto: false })] });
-
-    if (manualUpdateTimer) clearTimeout(manualUpdateTimer);
-    manualUpdateTimer = setTimeout(async () => {
-      await purgeChannel(ch);
-      await lockChannel(ch, false);
-      await ch.send({ content: "@everyone", embeds: [updatedEmbed({ auto: false })] });
-    }, minutes * 60_000);
-
+    await startUpdateFlow({ minutes, reason, auto: false });
     res.json({ success: true });
   } catch (e) { console.error("start-update:", e.message); res.json({ success: false, error: e.message }); }
 });
+
 app.post("/api/finish-update", async (_req, res) => {
   try {
-    const ch = await client.channels.fetch(CHANNEL_ID);
-    await purgeChannel(ch);
-    await lockChannel(ch, false);
-    if (manualUpdateTimer) clearTimeout(manualUpdateTimer);
-    await ch.send({ content: "@everyone", embeds: [updatedEmbed({ auto: false })] });
+    await finishUpdateFlow({ auto: false });
     res.json({ success: true });
   } catch (e) { console.error("finish-update:", e.message); res.json({ success: false, error: e.message }); }
 });
 
-// slash commands (admin-only)
+// ====== Slash Commands (admin-only) ======
 const slashCommands = [
   {
     name: "kick",
@@ -419,7 +471,7 @@ async function deployCommands({ guildId = "" } = {}, attempt = 1) {
       return { scope: "guild", guildId: gid };
     } else {
       await rest.put(Routes.applicationCommands(appId), { body: slashCommands });
-      console.log("🌐 Slash commands deployed globally (may take time).");
+      console.log("🌐 Slash commands deployed globally (may take up to 1h).");
       return { scope: "global" };
     }
   } catch (e) {
@@ -458,27 +510,18 @@ app.get("/api/commands", async (req, res) => {
 cron.schedule("0 15 * * *", async () => {
   if (!autoUpdate) return;
   try {
-    const ch = await client.channels.fetch(CHANNEL_ID);
-    await purgeChannel(ch);
-    await lockChannel(ch, true);
-    await ch.send({
-      content: "@everyone",
-      embeds: [updatingEmbed({ minutes: 5, reason: "Scheduled daily maintenance", auto: true })],
-    });
+    await startUpdateFlow({ minutes: 5, reason: "Scheduled daily maintenance", auto: true });
   } catch (e) { console.error("auto-start:", e.message); }
 }, { timezone: "Asia/Dhaka" });
 
 cron.schedule("5 15 * * *", async () => {
   if (!autoUpdate) return;
   try {
-    const ch = await client.channels.fetch(CHANNEL_ID);
-    await purgeChannel(ch);
-    await lockChannel(ch, false);
-    await ch.send({ content: "@everyone", embeds: [updatedEmbed({ auto: true })] });
+    await finishUpdateFlow({ auto: true });
   } catch (e) { console.error("auto-finish:", e.message); }
 }, { timezone: "Asia/Dhaka" });
 
-// ====== Interactions (enforce admin in runtime too) ======
+// ====== Interactions (runtime admin check) ======
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   if (!isAdmin(interaction.member)) {
@@ -561,7 +604,7 @@ client.on("messageCreate", async (message) => {
 client.on("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   try {
-    await deployCommands({ guildId: GUILD_ID || "" });
+    await deployCommands({ guildId: GUILD_ID || "" }); // guild = instant
   } catch (e) { console.error("Register commands failed:", e.message); }
 });
 
