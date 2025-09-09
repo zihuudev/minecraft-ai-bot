@@ -153,7 +153,7 @@ function updatingEmbed({ minutes, reason, auto = false }) {
     { name: "⚡ Performance", value: "Optimizing", inline: true },
     { name: "⏰ Duration", value: `${minutes} minute(s)`, inline: true },
     { name: "🧠 Update System", value: auto ? "Automatic (daily)" : "Manual", inline: true },
-    { name: "👨‍💻 Developer", value: "Zihuu", inline: true },
+    { name: "👨‍💻 Developer", value: "ZIHUU", inline: true },
   );
   if (reason) e.addFields({ name: "🛠️ Reason", value: reason });
   return e;
@@ -166,7 +166,7 @@ function updatedEmbed({ auto = false, completedAtText }) {
     { name: "🔓 Chat", value: "Unlocked", inline: true },
     { name: "⚡ Performance", value: "Fast", inline: true },
     { name: "🧠 Update System", value: auto ? "Automatic (daily)" : "Manual", inline: true },
-    { name: "👨‍💻 Developer", value: "Zihuu", inline: true },
+    { name: "👨‍💻 Developer", value: "ZIHUU", inline: true },
   );
   if (completedAtText) e.addFields({ name: "🕒 Completed", value: completedAtText, inline: true });
   return e;
@@ -642,5 +642,6 @@ client.login(DISCORD_TOKEN);
 const server = express();
 server.use((req, res, next) => app(req, res, next));
 server.listen(PORT, () => console.log(`🌐 Dashboard running on PORT ${PORT}`));
+
 
 
