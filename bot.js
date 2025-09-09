@@ -211,7 +211,7 @@ h1{margin:0 0 14px;font-size:22px}
     <input class="input" type="text" name="username" placeholder="Username" required/>
     <input class="input" type="password" name="password" placeholder="Password" required/>
     <button class="btn" type="submit">Login</button>
-    <div class="small">Authorized access only • 3 users: zihuu, shahin, mainuddin</div>
+    <div class="small">Authorized access only</div>
     <div class="err">{{ERR}}</div>
   </form>
 </body></html>`;
@@ -245,7 +245,7 @@ pre{background:rgba(255,255,255,.06);padding:12px;border-radius:12px;overflow:au
 <body>
 <div class="container">
   <div class="topbar">
-    <h1>⚡ Cyberland Premium Dashboard
+    <h1>CYBERLAND AI DASHBOARD
       <span id="autoState" class="badge">Auto: ...</span>
       <span id="aiState" class="badge">AI: ...</span>
       <span id="updState" class="badge">Update: idle</span>
@@ -642,3 +642,4 @@ client.login(DISCORD_TOKEN);
 const server = express();
 server.use((req, res, next) => app(req, res, next));
 server.listen(PORT, () => console.log(`🌐 Dashboard running on PORT ${PORT}`));
+
