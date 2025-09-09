@@ -4,10 +4,10 @@ const bodyParser = require("body-parser");
 const session = require("express-session");
 const axios = require("axios");
 const cron = require("node-cron");
-const moment = require("moment-timezone");
 const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 const util = require("minecraft-server-util");
 
+// === ENV Variables ===
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -16,6 +16,7 @@ const CHANNEL_ID = process.env.CHANNEL_ID;
 const MINECRAFT_IP = "play.cyberland.pro";
 const MINECRAFT_PORT = 19132;
 
+// === Discord Client ===
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -24,38 +25,33 @@ const client = new Client({
     ],
 });
 
-// ====== AI Chat ======
-async function queryOpenAI(prompt) {
+// === AI Chat Handler ===
+async function askOpenAI(prompt) {
     try {
         const response = await axios.post(
             "https://api.openai.com/v1/chat/completions",
             {
                 model: "gpt-3.5-turbo",
                 messages: [{ role: "user", content: prompt }],
-                max_tokens: 500,
                 temperature: 0.7,
+                max_tokens: 800,
             },
             {
                 headers: {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${OPENAI_API_KEY}`,
                 },
-                timeout: 30000,
+                timeout: 40000,
             }
         );
-
-        if (response.data?.choices?.length > 0) {
-            return response.data.choices[0].message.content.trim();
-        } else {
-            return "⚠️ AI didn't return any response. Please try again.";
-        }
+        return response.data.choices[0].message.content.trim();
     } catch (error) {
-        console.error("🔴 OpenAI API Error:", error.response?.data || error.message);
-        return "⚠️ AI is temporarily unavailable. Please try again later.";
+        console.error("OpenAI Error:", error.response?.data || error.message);
+        return "⚠️ **AI Service Temporarily Unavailable!** দয়া করে একটু পরে চেষ্টা করুন।";
     }
 }
 
-// ====== Express Dashboard ======
+// === Express Dashboard ===
 const app = express();
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -67,27 +63,58 @@ app.use(
     })
 );
 
-const dashboardHTML = `<!DOCTYPE html>
+// === Dashboard HTML ===
+const dashboardHTML = `
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cyberland Bot Dashboard</title>
 <style>
-body { margin: 0; background: #0f172a; color: white; font-family: Poppins, sans-serif; text-align: center; }
-.container { margin-top: 40px; }
-button { margin: 10px; padding: 15px; width: 280px; font-size: 16px; border: none; border-radius: 12px; cursor: pointer; transition: 0.3s; }
+body {
+    margin: 0;
+    background: linear-gradient(135deg,#0f172a,#1e293b);
+    color: white;
+    font-family: Poppins, sans-serif;
+    text-align: center;
+}
+.container {
+    margin-top: 40px;
+}
+button {
+    margin: 10px;
+    padding: 15px;
+    width: 280px;
+    font-size: 16px;
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: 0.3s;
+}
 #manualUpdate { background-color: #22c55e; color: white; }
 #finishUpdate { background-color: #06b6d4; color: white; }
 #toggleAuto { background-color: #facc15; color: black; }
-button:hover { transform: scale(1.05); }
-.status-box { margin-top: 25px; padding: 20px; background: rgba(255,255,255,0.05); border-radius: 12px; display: inline-block; }
+button:hover { transform: scale(1.05); filter: brightness(1.1); }
+.status-box {
+    margin-top: 25px;
+    padding: 20px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 12px;
+    display: inline-block;
+}
+input {
+    padding: 10px;
+    border-radius: 12px;
+    width: 250px;
+    border: none;
+}
 </style>
 </head>
 <body>
 <div class="container">
-    <h1>⚡ Cyberland Bot Dashboard</h1>
-    <input id="updateTime" type="number" placeholder="Enter minutes" style="padding:10px;border-radius:12px;width:250px;">
+    <h1>⚡ Cyberland Premium Bot Dashboard</h1>
+    <input id="updateTime" type="number" placeholder="Enter minutes">
     <button id="manualUpdate" onclick="startManualUpdate()">🚀 Start Manual Update</button>
     <button id="finishUpdate" onclick="fetch('/api/finish-update',{method:'POST'}).then(()=>alert('Update Finished!'))">✅ Finish Update</button>
     <button id="toggleAuto" onclick="fetch('/api/toggle-auto',{method:'POST'}).then(()=>alert('Toggled Auto Update!'))">🔄 Toggle Auto Update</button>
@@ -114,7 +141,7 @@ setInterval(getStatus, 10000);
 </body>
 </html>`;
 
-// ====== Routes ======
+// === Routes ===
 app.get("/", (req, res) => {
     if (!req.session.loggedIn) return res.send(`<form method='POST' action='/login'><input type='password' name='password'><button type='submit'>Login</button></form>`);
     res.send(dashboardHTML);
@@ -140,7 +167,7 @@ app.post("/api/start-update", async (req, res) => {
         const embed = new EmbedBuilder()
             .setColor("Gold")
             .setTitle("🚀 Manual Update Started")
-            .setDescription(`Bot is under maintenance for **${minutes} minutes**! Please wait...`)
+            .setDescription(`Bot is under maintenance for **${minutes} minutes**!`)
             .setFooter({ text: "Cyberland Bot" })
             .setTimestamp();
         await channel.send({ content: "@everyone", embeds: [embed] });
@@ -196,7 +223,7 @@ app.get("/api/server-status", async (req, res) => {
     }
 });
 
-// ====== Auto Update ======
+// === Auto Update ===
 cron.schedule("0 15 * * *", async () => {
     if (!autoUpdate) return;
     const channel = await client.channels.fetch(CHANNEL_ID);
@@ -223,17 +250,36 @@ cron.schedule("5 15 * * *", async () => {
     await channel.send({ content: "@everyone", embeds: [embed] });
 }, { timezone: "Asia/Dhaka" });
 
-// ====== AI Chat Handler ======
+// === Discord AI Chat ===
 client.on("messageCreate", async (message) => {
     if (message.author.bot || message.channel.id !== CHANNEL_ID) return;
     await message.channel.sendTyping();
-    const reply = await queryOpenAI(`${message.author.username}: ${message.content}`);
-    message.reply(reply);
+
+    const embed = new EmbedBuilder()
+        .setColor("#06b6d4")
+        .setTitle("🤖 Cyberland AI")
+        .setDescription("Thinking...")
+        .setFooter({ text: "Powered by GPT-3.5 Turbo" })
+        .setTimestamp();
+    const thinkingMsg = await message.reply({ embeds: [embed] });
+
+    const reply = await askOpenAI(`${message.author.username}: ${message.content}`);
+
+    const finalEmbed = new EmbedBuilder()
+        .setColor("#22c55e")
+        .setTitle("✨ Cyberland AI Response")
+        .setDescription(reply)
+        .setFooter({ text: "Cyberland Premium Bot" })
+        .setTimestamp();
+
+    thinkingMsg.edit({ embeds: [finalEmbed] });
 });
 
-// ====== Bot Ready ======
-client.on("ready", () => console.log(`✅ Logged in as ${client.user.tag}`));
+// === Ready Event ===
+client.on("ready", () => {
+    console.log(`✅ Logged in as ${client.user.tag}`);
+});
 
-// ====== Start Bot ======
+// === Start Bot ===
 client.login(DISCORD_TOKEN);
 app.listen(PORT, () => console.log(`🌐 Dashboard: http://localhost:${PORT}`));
