@@ -218,7 +218,7 @@ h1{margin:0 0 14px;font-size:22px}
 
 const dashHTML = (username) => `<!doctype html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Cyberland Premium Dashboard</title>
+<title>CYBERLAND AI DASHBOARD</title>
 <style>
 :root{--bg:#0b1220;--glass:rgba(255,255,255,.06);--border:rgba(255,255,255,.12);--text:#e5e7eb;--vio:#7c3aed;--cyan:#06b6d4;--green:#22c55e;--amber:#f59e0b;--red:#ef4444}
 *{box-sizing:border-box}body{margin:0;background:
@@ -642,6 +642,7 @@ client.login(DISCORD_TOKEN);
 const server = express();
 server.use((req, res, next) => app(req, res, next));
 server.listen(PORT, () => console.log(`🌐 Dashboard running on PORT ${PORT}`));
+
 
 
 
