@@ -8,7 +8,7 @@ const https = require("https");
 const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 const util = require("minecraft-server-util");
 
-// ====== ENV & CONFIG ======
+// ===== CONFIG =====
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -17,12 +17,7 @@ const CHANNEL_ID = process.env.CHANNEL_ID;
 const MINECRAFT_IP = "play.cyberland.pro";
 const MINECRAFT_PORT = 19132;
 
-// Safety: critical envs
-if (!DISCORD_TOKEN || !OPENAI_API_KEY || !CHANNEL_ID) {
-  console.warn("⚠️ Please set DISCORD_TOKEN, OPENAI_API_KEY, CHANNEL_ID in .env");
-}
-
-// ====== Discord Client ======
+// ===== Discord Client =====
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -31,94 +26,47 @@ const client = new Client({
   ],
 });
 
-// ====== AI (robust) ======
+// ===== OpenAI Config =====
 const httpsAgent = new https.Agent({ keepAlive: true });
-const MODELS = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo-0125"];
-const TRANSIENT_CODES = new Set([408, 409, 429, 500, 502, 503, 504]);
-
-async function callOpenAI(payload, attempt = 1, modelIndex = 0) {
-  const model = MODELS[modelIndex] || MODELS[MODELS.length - 1];
+async function askOpenAI(prompt) {
   try {
     const res = await axios.post(
       "https://api.openai.com/v1/chat/completions",
-      { ...payload, model },
+      {
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 600,
+      },
       {
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
         },
-        timeout: 75_000,
+        timeout: 75000,
         httpsAgent,
-        validateStatus: () => true,
       }
     );
-    if (res.status >= 200 && res.status < 300) {
-      const msg = res.data?.choices?.[0]?.message?.content?.trim();
-      if (msg) return msg;
-      throw new Error("Empty response");
-    }
-    if (res.status === 401) throw new Error("INVALID_API_KEY");
-    if (TRANSIENT_CODES.has(res.status)) {
-      if (attempt < 3) {
-        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
-        return callOpenAI(payload, attempt + 1, modelIndex);
-      }
-      if (modelIndex + 1 < MODELS.length) return callOpenAI(payload, 1, modelIndex + 1);
-    }
-    if (modelIndex + 1 < MODELS.length) return callOpenAI(payload, 1, modelIndex + 1);
-    throw new Error(`OpenAI ${res.status}: ${JSON.stringify(res.data)}`);
-  } catch (err) {
-    if (["ECONNABORTED", "ETIMEDOUT", "ECONNRESET"].includes(err.code)) {
-      if (attempt < 3) {
-        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
-        return callOpenAI(payload, attempt + 1, modelIndex);
-      }
-      if (modelIndex + 1 < MODELS.length) return callOpenAI(payload, 1, modelIndex + 1);
-    }
-    if (err.message === "INVALID_API_KEY") return "❌ Invalid OpenAI API Key। `.env` চেক করুন।";
-    return "⚠️ AI সাড়া দিতে পারছে না। একটু পরে চেষ্টা করুন।";
-  }
-}
-async function askOpenAI(prompt) {
-  return callOpenAI({
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.7,
-    max_tokens: 600,
-  });
-}
-
-// ====== Helpers ======
-async function purgeChannel(channel) {
-  try {
-    let fetched;
-    do {
-      fetched = await channel.messages.fetch({ limit: 100 });
-      if (fetched.size > 0) {
-        await channel.bulkDelete(fetched, true).catch(() => {});
-        for (const [, msg] of fetched) { await msg.delete().catch(() => {}); }
-      }
-    } while (fetched.size >= 2);
-  } catch (e) {
-    console.error("Purge error:", e.message);
+    return res.data?.choices?.[0]?.message?.content?.trim() || "⚠️ AI কোনো উত্তর দিতে পারছে না।";
+  } catch {
+    return "⚠️ AI সার্ভার বর্তমানে অনুপলব্ধ। পরে আবার চেষ্টা করুন।";
   }
 }
 
+// ===== Premium Embeds =====
 function updatingEmbed(minutes, reason) {
-  // Premium look, no images
   return new EmbedBuilder()
     .setColor("#f97316")
     .setTitle("🚀 Bot is Updating")
-    .setDescription([
-      "⚡ **System maintenance has started.**",
-      reason ? `🛠️ **Reason:** ${reason}` : "🛠️ **Reason:** Routine maintenance",
-      `⏳ **Estimated Duration:** ${minutes} minute(s)`,
-      "",
-      "Please wait while we upgrade and optimize the system.",
-    ].join("\n"))
-    .addFields(
-      { name: "Developed By", value: "Zihuu", inline: true },
-      { name: "Status", value: "Updating…", inline: true },
+    .setDescription(
+      [
+        `⚡ **System maintenance has started!**`,
+        reason ? `🛠️ **Reason:** ${reason}` : "🛠️ **Reason:** Routine Maintenance",
+        `⏳ **Estimated Duration:** ${minutes} minute(s)`,
+        "",
+        "Please wait while we upgrade and optimize the system.",
+      ].join("\n")
     )
+    .addFields({ name: "Developed By", value: "Zihuu", inline: true })
     .setFooter({ text: "Cyberland • Premium Bot" })
     .setTimestamp();
 }
@@ -128,15 +76,30 @@ function updatedEmbed() {
     .setColor("#22c55e")
     .setTitle("✅ Bot Updated Successfully")
     .setDescription("🎉 All systems are online. Enjoy the improved experience!")
-    .addFields(
-      { name: "Developed By", value: "Zihuu", inline: true },
-      { name: "Status", value: "Online", inline: true },
-    )
+    .addFields({ name: "Developed By", value: "Zihuu", inline: true })
     .setFooter({ text: "Cyberland • Premium Bot" })
     .setTimestamp();
 }
 
-// ====== Dashboard (HTML-in-code) ======
+// ===== Purge Function =====
+async function purgeChannel(channel) {
+  try {
+    let fetched;
+    do {
+      fetched = await channel.messages.fetch({ limit: 100 });
+      if (fetched.size > 0) {
+        await channel.bulkDelete(fetched, true).catch(() => {});
+        for (const [, msg] of fetched) {
+          await msg.delete().catch(() => {});
+        }
+      }
+    } while (fetched.size >= 2);
+  } catch (e) {
+    console.error("Purge error:", e.message);
+  }
+}
+
+// ===== Dashboard HTML =====
 const app = express();
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -166,7 +129,6 @@ label{display:block;margin:6px 0 4px;text-align:left}
 <body>
   <div class="container">
     <h1>⚡ Cyberland Premium Bot Dashboard</h1>
-
     <div class="card">
       <div class="row">
         <div class="col">
@@ -182,18 +144,6 @@ label{display:block;margin:6px 0 4px;text-align:left}
       <button class="btn btn-cyan" onclick="finishUpdate()">✅ Finish Update</button>
       <p class="kv">Start দিলে: Lock + Purge + @everyone + Premium Embed • Finish দিলে: Unlock + Purge + @everyone + Premium Embed</p>
     </div>
-
-    <div class="row">
-      <div class="card col">
-        <h3>Auto Update</h3>
-        <p>Daily window: 3:00–3:05 PM (Asia/Dhaka)</p>
-        <button class="btn btn-amber" onclick="toggleAuto()">🔄 Toggle Auto (${autoUpdate ? "ON" : "OFF"})</button>
-      </div>
-      <div class="card col">
-        <h3>Minecraft Live Status</h3>
-        <div id="status">Checking server…</div>
-      </div>
-    </div>
   </div>
 
 <script>
@@ -208,22 +158,11 @@ async function finishUpdate(){
   await fetch('/api/finish-update',{method:'POST'});
   alert('Update finished');
 }
-async function toggleAuto(){
-  const r = await fetch('/api/toggle-auto',{method:'POST'});
-  const j = await r.json();
-  alert('Auto update is now '+(j.autoUpdate?'ON':'OFF'));
-  location.reload();
-}
-async function pollStatus(){
-  const r = await fetch('/api/server-status');
-  const d = await r.json();
-  document.getElementById('status').innerText = d.online ? ('🟢 Online — Players: '+d.players+' | Ping: '+d.ping+'ms') : '🔴 Offline';
-}
-pollStatus(); setInterval(pollStatus, 10_000);
 </script>
 </body></html>`;
 }
 
+// ===== Routes =====
 app.get("/", (req, res) => {
   if (!req.session.loggedIn) {
     return res.send(
@@ -247,25 +186,23 @@ app.post("/login", (req, res) => {
 let autoUpdate = true;
 let manualUpdateTimeout = null;
 
-// ====== API: Start Update (lock + purge + embed) ======
+// ====== Start Update ======
 app.post("/api/start-update", async (req, res) => {
   try {
     const minutes = Math.max(1, Number(req.body.minutes || 1));
     const reason = (req.body.reason || "").toString().slice(0, 1000);
     const channel = await client.channels.fetch(CHANNEL_ID);
 
-    // lock + purge
-    await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: false });
     await purgeChannel(channel);
+    await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: false });
 
-    // premium embed (no images), with @everyone
+    // send immediately
     await channel.send({ content: "@everyone", embeds: [updatingEmbed(minutes, reason)] });
 
-    // schedule auto-finish
     if (manualUpdateTimeout) clearTimeout(manualUpdateTimeout);
     manualUpdateTimeout = setTimeout(async () => {
-      await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: true });
       await purgeChannel(channel);
+      await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: true });
       await channel.send({ content: "@everyone", embeds: [updatedEmbed()] });
     }, minutes * 60_000);
 
@@ -276,12 +213,12 @@ app.post("/api/start-update", async (req, res) => {
   }
 });
 
-// ====== API: Finish Update (unlock + purge + embed) ======
+// ====== Finish Update ======
 app.post("/api/finish-update", async (_req, res) => {
   try {
     const channel = await client.channels.fetch(CHANNEL_ID);
-    await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: true });
     await purgeChannel(channel);
+    await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: true });
     if (manualUpdateTimeout) clearTimeout(manualUpdateTimeout);
     await channel.send({ content: "@everyone", embeds: [updatedEmbed()] });
     res.json({ success: true });
@@ -291,66 +228,17 @@ app.post("/api/finish-update", async (_req, res) => {
   }
 });
 
-// ====== API: Toggle Auto Update ======
-app.post("/api/toggle-auto", (_req, res) => {
-  autoUpdate = !autoUpdate;
-  res.json({ autoUpdate });
-});
-
-// ====== API: Minecraft Status ======
-app.get("/api/server-status", async (_req, res) => {
-  try {
-    const status = await util.status(MINECRAFT_IP, MINECRAFT_PORT);
-    res.json({ online: true, players: status.players.online, ping: status.roundTripLatency });
-  } catch {
-    res.json({ online: false });
-  }
-});
-
-// ====== Auto Update Window (3:00–3:05 PM) ======
-cron.schedule("0 15 * * *", async () => {
-  if (!autoUpdate) return;
-  try {
-    const channel = await client.channels.fetch(CHANNEL_ID);
-    await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: false });
-    await purgeChannel(channel);
-    await channel.send({ content: "@everyone", embeds: [updatingEmbed(5, "Scheduled daily maintenance")] });
-  } catch (e) { console.error("auto-start error:", e.message); }
-}, { timezone: "Asia/Dhaka" });
-
-cron.schedule("5 15 * * *", async () => {
-  if (!autoUpdate) return;
-  try {
-    const channel = await client.channels.fetch(CHANNEL_ID);
-    await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: true });
-    await purgeChannel(channel);
-    await channel.send({ content: "@everyone", embeds: [updatedEmbed()] });
-  } catch (e) { console.error("auto-finish error:", e.message); }
-}, { timezone: "Asia/Dhaka" });
-
-// ====== Discord: AI chat (normal reply, no embed) ======
-let aiQueue = Promise.resolve(); // serialize requests
+// ===== AI Chat =====
 client.on("messageCreate", async (message) => {
   if (message.author.bot || message.channel.id !== CHANNEL_ID) return;
-
-  // Commands (optional):
-  if (message.content === "!help") {
-    return void message.reply("Commands: `!help` • Normal chat here for AI reply.");
-  }
-
   await message.channel.sendTyping();
-  aiQueue = aiQueue.then(async () => {
-    const answer = await askOpenAI(`${message.author.username}: ${message.content}`);
-    await message.reply(answer || "⚠️ AI CAN'T GIVE ANSWER RIGHT NOW");
-  });
-  await aiQueue;
+  const answer = await askOpenAI(`${message.author.username}: ${message.content}`);
+  await message.reply(answer);
 });
 
-// ====== Start ======
+// ===== Start Bot =====
 client.on("ready", () => console.log(`✅ Logged in as ${client.user.tag}`));
 client.login(DISCORD_TOKEN);
 
-// Express listen (for Railway/Render)
-const server = express();
-server.use(app);
-server.listen(PORT, () => console.log(`🌐 Dashboard running on PORT ${PORT}`));
+// Express listen
+app.listen(PORT, () => console.log(`🌐 Dashboard running on PORT ${PORT}`));
