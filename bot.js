@@ -25,7 +25,7 @@ const client = new Client({
     ],
 });
 
-// === AI Chat Handler ===
+// === AI Chat ===
 async function askOpenAI(prompt) {
     try {
         const response = await axios.post(
@@ -34,20 +34,20 @@ async function askOpenAI(prompt) {
                 model: "gpt-3.5-turbo",
                 messages: [{ role: "user", content: prompt }],
                 temperature: 0.7,
-                max_tokens: 800,
+                max_tokens: 500,
             },
             {
                 headers: {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${OPENAI_API_KEY}`,
                 },
-                timeout: 40000,
+                timeout: 30000,
             }
         );
         return response.data.choices[0].message.content.trim();
     } catch (error) {
         console.error("OpenAI Error:", error.response?.data || error.message);
-        return "⚠️ **AI Service Temporarily Unavailable!** দয়া করে একটু পরে চেষ্টা করুন।";
+        return "⚠️ AI সার্ভার এখন ডাউন আছে। কিছুক্ষণ পর চেষ্টা করুন।";
     }
 }
 
@@ -159,26 +159,45 @@ app.post("/login", (req, res) => {
 let autoUpdate = true;
 let manualUpdateTimeout = null;
 
+// === Delete All Messages in Channel ===
+async function clearChannelMessages(channel) {
+    let fetched;
+    do {
+        fetched = await channel.messages.fetch({ limit: 100 });
+        await channel.bulkDelete(fetched);
+    } while (fetched.size >= 2);
+}
+
+// === Start Manual Update ===
 app.post("/api/start-update", async (req, res) => {
     try {
         const { minutes } = req.body;
         const channel = await client.channels.fetch(CHANNEL_ID);
+
+        // Lock channel & delete all messages
         await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: false });
+        await clearChannelMessages(channel);
+
         const embed = new EmbedBuilder()
-            .setColor("#ff9800")
-            .setTitle("🚀 Manual Update Started")
-            .setDescription(`**Bot Maintenance Mode**\n⏳ Duration: **${minutes} minutes**`)
+            .setColor("#ff2d55")
+            .setTitle("🚀 Cyberland Bot Updating...")
+            .setDescription(`⚡ **Bot Maintenance Started**\n⏳ Duration: **${minutes} minutes**\n\nPlease wait while we upgrade the system...`)
+            .setImage("https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZWZnc2JpN3U1ZTIzZXdtZzFnd3lsZXRnaXBycW1wbnA4ZXdxOG9qaiZlcD12MV9pbnRlcm5hbF9naWZzX2dpZmlfYnlfaWQ&rid=200.gif") // Premium GIF
             .setFooter({ text: "Cyberland Premium Bot" })
             .setTimestamp();
+
         await channel.send({ content: "@everyone", embeds: [embed] });
 
+        // Schedule finish automatically after given minutes
         if (manualUpdateTimeout) clearTimeout(manualUpdateTimeout);
         manualUpdateTimeout = setTimeout(async () => {
             await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: true });
+            await clearChannelMessages(channel);
+
             const finishEmbed = new EmbedBuilder()
                 .setColor("#4caf50")
-                .setTitle("✅ Manual Update Finished")
-                .setDescription("Bot is **back online**! 🚀")
+                .setTitle("✅ Cyberland Bot Updated Successfully!")
+                .setDescription("🎉 The bot has been updated and is now **online**!")
                 .setFooter({ text: "Cyberland Premium Bot" })
                 .setTimestamp();
             await channel.send({ content: "@everyone", embeds: [finishEmbed] });
@@ -191,16 +210,20 @@ app.post("/api/start-update", async (req, res) => {
     }
 });
 
+// === Finish Update Manually ===
 app.post("/api/finish-update", async (req, res) => {
     try {
         const channel = await client.channels.fetch(CHANNEL_ID);
         await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: true });
+        await clearChannelMessages(channel);
+
         const embed = new EmbedBuilder()
             .setColor("#4caf50")
-            .setTitle("✅ Update Finished")
-            .setDescription("Bot update completed successfully! 🚀")
+            .setTitle("✅ Bot Updated Successfully!")
+            .setDescription("🎉 The bot has been updated and is now **online**!")
             .setFooter({ text: "Cyberland Premium Bot" })
             .setTimestamp();
+
         await channel.send({ content: "@everyone", embeds: [embed] });
         res.json({ success: true });
     } catch (e) {
@@ -209,11 +232,13 @@ app.post("/api/finish-update", async (req, res) => {
     }
 });
 
+// === Toggle Auto Update ===
 app.post("/api/toggle-auto", (req, res) => {
     autoUpdate = !autoUpdate;
     res.json({ autoUpdate });
 });
 
+// === Minecraft Server Status ===
 app.get("/api/server-status", async (req, res) => {
     try {
         const status = await util.status(MINECRAFT_IP, MINECRAFT_PORT);
@@ -223,48 +248,13 @@ app.get("/api/server-status", async (req, res) => {
     }
 });
 
-// === Auto Update ===
-cron.schedule("0 15 * * *", async () => {
-    if (!autoUpdate) return;
-    const channel = await client.channels.fetch(CHANNEL_ID);
-    await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: false });
-    const embed = new EmbedBuilder()
-        .setColor("#f59e0b")
-        .setTitle("⚡ Auto Update Started")
-        .setDescription("Bot updating automatically...")
-        .setFooter({ text: "Cyberland Premium Bot" })
-        .setTimestamp();
-    await channel.send({ content: "@everyone", embeds: [embed] });
-}, { timezone: "Asia/Dhaka" });
-
-cron.schedule("5 15 * * *", async () => {
-    if (!autoUpdate) return;
-    const channel = await client.channels.fetch(CHANNEL_ID);
-    await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: true });
-    const embed = new EmbedBuilder()
-        .setColor("#4caf50")
-        .setTitle("✅ Auto Update Finished")
-        .setDescription("Bot is back online! 🚀")
-        .setFooter({ text: "Cyberland Premium Bot" })
-        .setTimestamp();
-    await channel.send({ content: "@everyone", embeds: [embed] });
-}, { timezone: "Asia/Dhaka" });
-
-// === Discord AI Chat ===
+// === AI Chat Normal Reply ===
 client.on("messageCreate", async (message) => {
     if (message.author.bot || message.channel.id !== CHANNEL_ID) return;
 
     await message.channel.sendTyping();
     const reply = await askOpenAI(`${message.author.username}: ${message.content}`);
-
-    const embed = new EmbedBuilder()
-        .setColor("#06b6d4")
-        .setTitle("🤖 Cyberland AI Reply")
-        .setDescription(reply)
-        .setFooter({ text: "Powered by GPT-3.5 Turbo" })
-        .setTimestamp();
-
-    message.reply({ embeds: [embed] });
+    message.reply(reply);
 });
 
 // === Ready Event ===
