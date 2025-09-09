@@ -25,25 +25,24 @@ const client = new Client({
     ],
 });
 
-// === AI Chat Function ===
+// === AI Chat Function (FIXED) ===
 async function askOpenAI(prompt) {
     try {
-        const response = await axios.post(
-            "https://api.openai.com/v1/chat/completions",
-            {
-                model: "gpt-4o-mini", // ✅ বেশি দ্রুত এবং সঠিক
-                messages: [{ role: "user", content: prompt }],
-                temperature: 0.7,
-                max_tokens: 500,
+        const response = await axios({
+            method: "POST",
+            url: "https://api.openai.com/v1/chat/completions",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${OPENAI_API_KEY}`,
             },
-            {
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${OPENAI_API_KEY}`,
-                },
-                timeout: 30000,
-            }
-        );
+            data: {
+                model: "gpt-4o-mini", // ✅ ফাস্ট + স্টেবল
+                messages: [{ role: "user", content: prompt }],
+                max_tokens: 500,
+                temperature: 0.7,
+            },
+            timeout: 60000, // ✅ 60 সেকেন্ড টাইমআউট, আগের 10s এর পরিবর্তে
+        });
 
         if (
             response.data &&
@@ -52,11 +51,21 @@ async function askOpenAI(prompt) {
         ) {
             return response.data.choices[0].message.content.trim();
         } else {
-            return "⚠️ AI থেকে কোনো উত্তর আসেনি। পরে আবার চেষ্টা করুন।";
+            return "⚠️ AI কোনো উত্তর পাঠায়নি। আবার চেষ্টা করুন।";
         }
     } catch (error) {
         console.error("OpenAI Error:", error.response?.data || error.message);
-        return "⚠️ AI সার্ভার বর্তমানে অনুপলব্ধ। পরে আবার চেষ্টা করুন।";
+
+        // ✅ স্পেশাল এরর হ্যান্ডলিং
+        if (error.response?.status === 401) {
+            return "❌ **Invalid OpenAI API Key**। `.env` ফাইল চেক করুন।";
+        } else if (error.response?.status === 429) {
+            return "⏳ **Rate limit exceeded**। একটু পরে আবার চেষ্টা করুন।";
+        } else if (error.code === "ECONNABORTED") {
+            return "⚡ OpenAI সার্ভার স্লো, আবার চেষ্টা করুন।";
+        } else {
+            return "⚠️ AI সার্ভার বর্তমানে অনুপলব্ধ। পরে আবার চেষ্টা করুন।";
+        }
     }
 }
 
@@ -88,9 +97,7 @@ body {
     font-family: Poppins, sans-serif;
     text-align: center;
 }
-.container {
-    margin-top: 40px;
-}
+.container { margin-top: 40px; }
 button {
     margin: 10px;
     padding: 15px;
@@ -191,7 +198,7 @@ app.post("/api/start-update", async (req, res) => {
             .setColor("#ff2d55")
             .setTitle("🚀 Cyberland Bot Updating...")
             .setDescription(`⚡ **Bot Maintenance Started**\n⏳ Duration: **${minutes} minutes**\n\nPlease wait while we upgrade the system...`)
-            .setImage("https://i.imgur.com/Lr9F1jE.gif") // Premium GIF
+            .setImage("https://i.imgur.com/Lr9F1jE.gif")
             .setFooter({ text: "Cyberland Premium Bot" })
             .setTimestamp();
 
@@ -237,22 +244,6 @@ app.post("/api/finish-update", async (req, res) => {
     } catch (e) {
         console.error(e);
         res.json({ success: false });
-    }
-});
-
-// === Toggle Auto Update ===
-app.post("/api/toggle-auto", (req, res) => {
-    autoUpdate = !autoUpdate;
-    res.json({ autoUpdate });
-});
-
-// === Minecraft Server Status ===
-app.get("/api/server-status", async (req, res) => {
-    try {
-        const status = await util.status(MINECRAFT_IP, MINECRAFT_PORT);
-        res.json({ online: true, players: status.players.online, ping: status.roundTripLatency });
-    } catch {
-        res.json({ online: false });
     }
 });
 
