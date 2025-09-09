@@ -1,6 +1,7 @@
-// ===================== Premium Cyberland Bot — All-in-One =====================
-// Developed by Zihuu (footer across UI). Single-file, Railway/Render ready.
-// ============================================================================
+// ===================== Cyberland Premium Bot — Single File =====================
+// Ultra-premium login & dashboard, manual+auto updates, AI chat, slash cmds.
+// Developed by Zihuu
+// ==============================================================================
 
 require("dotenv").config();
 const express = require("express");
@@ -23,18 +24,18 @@ const mcu = require("minecraft-server-util");
 
 // ====== ENV ======
 const PORT = process.env.PORT || 3000;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "change-me";
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN || "";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
-const CHANNEL_ID = process.env.CHANNEL_ID;
+const CHANNEL_ID = process.env.CHANNEL_ID || "";
 const GUILD_ID = process.env.GUILD_ID || "";
+const TZ = "Asia/Dhaka";
 
-// Minecraft Bedrock
+// Minecraft Bedrock target
 const MINECRAFT_IP = "play.cyberland.pro";
 const MINECRAFT_PORT = 19132;
 
-// ====== Client ======
+// ====== Discord Client ======
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -46,22 +47,21 @@ const client = new Client({
 });
 
 // ====== Runtime State ======
-let autoUpdate = true;         // daily 3:00–3:05 PM BD
-let aiEnabled = true;          // AI chat toggle
-let autoroleId = null;         // saved via dashboard or /autorole
-let manualUpdateTimer = null;  // setTimeout handle
-let updateState = {            // live countdown for dashboard
+let autoUpdate = true;        // daily 3:00–3:05 PM BD
+let aiEnabled = true;         // AI chat toggle
+let autoroleId = null;        // saved via slash/dashboard
+let manualUpdateTimer = null; // setTimeout handle
+let updateState = {           // dashboard countdown state
   active: false,
   auto: false,
   reason: "",
   startedAt: 0,
-  endsAt: 0,       // epoch ms
-  minutes: 0
+  endsAt: 0,
+  minutes: 0,
 };
+const owoStats = new Map();
 
-const owoStats = new Map();    // simple in-memory counter
-
-// ====== Utilities ======
+// ====== Helpers ======
 function isAdmin(member) {
   return member?.permissions?.has(PermissionsBitField.Flags.Administrator);
 }
@@ -71,7 +71,6 @@ async function purgeChannel(channel) {
     do {
       fetched = await channel.messages.fetch({ limit: 100 });
       if (fetched.size > 0) {
-        // bulkDelete misses messages older than 14 days; fall back to single delete
         await channel.bulkDelete(fetched, true).catch(() => {});
         for (const [, msg] of fetched) await msg.delete().catch(() => {});
       }
@@ -85,7 +84,7 @@ async function lockChannel(channel, locked) {
     SendMessages: locked ? false : true,
   });
 }
-function fmtEta(ms) {
+function fmtMs(ms) {
   if (ms <= 0) return "now";
   const m = Math.floor(ms / 60000);
   const s = Math.floor((ms % 60000) / 1000);
@@ -93,11 +92,12 @@ function fmtEta(ms) {
   return `${s}s`;
 }
 
-// ====== OpenAI (friendly ChatGPT-style, resilient) ======
+// ====== OpenAI (friendly resilient) ======
 const httpsAgent = new https.Agent({ keepAlive: true });
 const RETRYABLE = new Set([408, 409, 429, 500, 502, 503, 504]);
 
 async function chatOpenAI(messages, attempt = 1) {
+  if (!OPENAI_API_KEY) return "❌ OpenAI key missing.";
   try {
     const res = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -112,109 +112,123 @@ async function chatOpenAI(messages, attempt = 1) {
     if (res.status >= 200 && res.status < 300) {
       return res.data?.choices?.[0]?.message?.content?.trim() || "I'm here!";
     }
-    if (res.status === 401) return "❌ Invalid OpenAI API Key. Check your .env.";
+    if (res.status === 401) return "❌ Invalid OpenAI API Key. Check your environment.";
     if (RETRYABLE.has(res.status) && attempt < 3) {
       await new Promise(r => setTimeout(r, 900 * attempt));
       return chatOpenAI(messages, attempt + 1);
     }
-    return "⚠️ AI service is temporarily unavailable. Please try again.";
+    return "⚠️ AI service temporarily unavailable. Please try again.";
   } catch (e) {
     if (["ECONNABORTED", "ETIMEDOUT", "ECONNRESET"].includes(e.code) && attempt < 3) {
       await new Promise(r => setTimeout(r, 900 * attempt));
       return chatOpenAI(messages, attempt + 1);
     }
-    return "⚠️ AI service is temporarily unavailable. Please try again.";
+    return "⚠️ AI service temporarily unavailable. Please try again.";
   }
 }
 function askAI(user, text) {
   const sys = {
     role: "system",
     content:
-      "You are a helpful, friendly assistant like ChatGPT-4. Be concise, warm, and accurate. If asked about Minecraft, give practical tips and command examples.",
+      "You are a helpful, friendly assistant (ChatGPT style). Keep replies clear, accurate, and kind. If asked about Minecraft, provide useful commands, versions, and practical steps.",
   };
   return chatOpenAI([sys, { role: "user", content: `${user}: ${text}` }]);
 }
 
-// ====== Premium Embeds (screenshot-style) ======
-function banner(color, title) {
-  return new EmbedBuilder().setColor(color).setTitle(title).setTimestamp().setFooter({
-    text: "Developed by Zihuu • Cyberland Premium Bot",
-  });
+// ====== Premium Embeds ======
+function baseEmbed(hex, title) {
+  return new EmbedBuilder()
+    .setColor(hex)
+    .setTitle(title)
+    .setTimestamp();
 }
 function updatingEmbed({ minutes, reason, auto = false }) {
-  // emulate your screenshot: fields with icons + short body
-  const e = banner("#F59E0B", auto ? "⚡ Automatic Update Started" : "🚀 Update Started");
-  e.setDescription("Please wait while we perform a premium maintenance to keep everything smooth.");
+  const e = baseEmbed("#F59E0B", auto ? "⚡ Automatic Update Started" : "🚀 Update Started");
+  e.setDescription(
+    "Please wait while we perform maintenance to keep the bot lightning-fast and stable."
+  );
   e.addFields(
     { name: "🎉 Status", value: "Bot is updating…", inline: true },
     { name: "🔒 Chat", value: "Locked", inline: true },
-    { name: "⚡ Server Performance", value: "Fast", inline: true },
-    { name: "⏰ Update Duration", value: `in ${minutes} minutes`, inline: true },
-    { name: "🧠 Update system", value: auto ? "Runs automatically" : "Manual maintenance", inline: true },
-    { name: "⚙️ Frequency", value: auto ? "Daily at 3:00 PM" : `One-time (${minutes}m)`, inline: true },
+    { name: "⚡ Performance", value: "Optimizing", inline: true },
+    { name: "⏰ Duration", value: `${minutes} minute(s)`, inline: true },
+    { name: "🧠 Update System", value: auto ? "Automatic (daily)" : "Manual", inline: true },
+    { name: "👨‍💻 Developer", value: "Zihuu", inline: true },
   );
   if (reason) e.addFields({ name: "🛠️ Reason", value: reason });
   return e;
 }
 function updatedEmbed({ auto = false, completedAtText }) {
-  const e = banner("#22C55E", auto ? "✅ Automatic Update Completed" : "✅ Update Completed");
-  e.setDescription("You can now use the bot!");
+  const e = baseEmbed("#22C55E", auto ? "✅ Automatic Update Completed" : "✅ Update Completed");
+  e.setDescription("Everything is up-to-date. You can use the bot now.");
   e.addFields(
-    { name: "🎉 Status", value: "Bot is ready to use", inline: true },
+    { name: "🎉 Status", value: "Ready to use", inline: true },
     { name: "🔓 Chat", value: "Unlocked", inline: true },
-    { name: "⚡ Server Performance", value: "Fast", inline: true },
-    { name: "⏰ Update Duration", value: auto ? "Tomorrow 3:00 PM" : "—", inline: true },
-    { name: "🧠 Update system", value: auto ? "Active and running automatically" : "Manual complete", inline: true },
-    { name: "⚙️ Frequency", value: auto ? "Every day" : "—", inline: true },
+    { name: "⚡ Performance", value: "Fast", inline: true },
+    { name: "🧠 Update System", value: auto ? "Automatic (daily)" : "Manual", inline: true },
+    { name: "👨‍💻 Developer", value: "Zihuu", inline: true },
   );
-  if (completedAtText) e.setFooter({ text: `Developed by Zihuu • ${completedAtText}` });
+  if (completedAtText) e.addFields({ name: "🕒 Completed", value: completedAtText, inline: true });
   return e;
 }
 
-// ====== Dashboard (ultra-premium glass) ======
+// ====== Web (Ultra-premium login & dashboard) ======
 const app = express();
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(
-  session({ secret: "cyberland-dashboard-secret", resave: false, saveUninitialized: true })
+  session({
+    secret: "cyberland-ultra-session",
+    resave: false,
+    saveUninitialized: true,
+  })
 );
+
+// fixed 3-user login
+const USERS = new Map([
+  ["zihuu", "cyberlandai90x90x90"],
+  ["shahin", "cyberlandai90x90x90"],
+  ["mainuddin", "cyberlandai90x90x90"],
+]);
 
 const loginHTML = `<!doctype html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Login • Cyberland</title>
+<title>Cyberland • Admin Login</title>
 <style>
-:root{--bg:#0a0f1d;--glass:rgba(255,255,255,.06);--border:rgba(255,255,255,.12);--text:#e5e7eb;--vio:#7c3aed;--cyan:#06b6d4}
+:root{--bg1:#070b16;--bg2:#0c1326;--text:#e5e7eb;--glass:rgba(255,255,255,.06);--border:rgba(255,255,255,.12);--vio:#7c3aed;--cyan:#06b6d4;--red:#ef4444}
 *{box-sizing:border-box}body{margin:0;height:100vh;display:grid;place-items:center;background:
-radial-gradient(900px 600px at 10% 10%,#112046 0%,#0a0f1d 55%,#080c16 100%);color:var(--text);font-family:Inter,ui-sans-serif,system-ui}
-.card{width:95%;max-width:420px;background:var(--glass);border:1px solid var(--border);border-radius:18px;padding:26px;backdrop-filter:blur(8px);box-shadow:0 10px 40px rgba(0,0,0,.35);animation:float 8s ease-in-out infinite}
-@keyframes float{0%{transform:translateY(0)}50%{transform:translateY(-6px)}100%{transform:translateY(0)}}
+radial-gradient(900px 600px at 10% 10%,#101a39 0%,#0b1220 55%,#070b16 100%);color:var(--text);font-family:Inter,ui-sans-serif,system-ui}
+.card{width:95%;max-width:440px;background:var(--glass);border:1px solid var(--border);border-radius:18px;padding:26px;backdrop-filter:blur(10px);box-shadow:0 12px 48px rgba(0,0,0,.45);animation:float 9s ease-in-out infinite}
+@keyframes float{0%{transform:translateY(0)}50%{transform:translateY(-7px)}100%{transform:translateY(0)}}
 h1{margin:0 0 14px;font-size:22px}
-.input{width:100%;padding:12px;border:none;border-radius:12px;background:rgba(255,255,255,.08);color:#fff;outline:none}
-.btn{width:100%;margin-top:12px;padding:12px 14px;border:none;border-radius:12px;color:#fff;cursor:pointer;background:linear-gradient(135deg,var(--vio),var(--cyan))}
+.input{width:100%;padding:12px;border:none;border-radius:12px;background:rgba(255,255,255,.08);color:#fff;outline:none;margin-top:10px}
+.btn{width:100%;margin-top:14px;padding:12px 14px;border:none;border-radius:12px;color:#fff;cursor:pointer;background:linear-gradient(135deg,var(--vio),var(--cyan))}
 .small{opacity:.8;font-size:12px;margin-top:10px}
-</style></head>
-<body>
+.err{color:var(--red);margin-top:10px}
+</style></head><body>
   <form class="card" method="POST" action="/login">
     <h1>🔐 Cyberland Admin</h1>
-    <input class="input" type="password" name="password" placeholder="Admin Password" required/>
+    <input class="input" type="text" name="username" placeholder="Username" required/>
+    <input class="input" type="password" name="password" placeholder="Password" required/>
     <button class="btn" type="submit">Login</button>
-    <div class="small">Authorized access only.</div>
+    <div class="small">Authorized access only • 3 users: zihuu, shahin, mainuddin</div>
+    <div class="err">{{ERR}}</div>
   </form>
 </body></html>`;
 
-const dashHTML = () => `<!doctype html><html><head><meta charset="utf-8"/>
+const dashHTML = (username) => `<!doctype html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Cyberland Premium Dashboard</title>
 <style>
 :root{--bg:#0b1220;--glass:rgba(255,255,255,.06);--border:rgba(255,255,255,.12);--text:#e5e7eb;--vio:#7c3aed;--cyan:#06b6d4;--green:#22c55e;--amber:#f59e0b;--red:#ef4444}
 *{box-sizing:border-box}body{margin:0;background:
 radial-gradient(1200px 800px at 10% 10%,#0f1f3a 0%,#0b1220 45%,#080c16 100%);color:var(--text);font-family:Inter,ui-sans-serif,system-ui}
-.container{max-width:1120px;margin:28px auto;padding:0 16px}
+.container{max-width:1180px;margin:28px auto;padding:0 16px}
 h1{font-weight:800;letter-spacing:.3px}
 .tabs{display:flex;gap:8px;margin:16px 0;flex-wrap:wrap}
 .tab{padding:10px 14px;border-radius:12px;background:var(--glass);border:1px solid var(--border);cursor:pointer;user-select:none}
 .tab.active{background:linear-gradient(135deg,rgba(124,58,237,.35),rgba(6,182,212,.35));border-color:rgba(255,255,255,.22)}
-.card{background:var(--glass);border:1px solid var(--border);border-radius:16px;padding:20px;backdrop-filter:blur(8px);margin-bottom:16px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+.card{background:var(--glass);border:1px solid var(--border);border-radius:16px;padding:20px;backdrop-filter:blur(10px);margin-bottom:16px;box-shadow:0 10px 36px rgba(0,0,0,.35)}
 .row{display:flex;gap:16px;flex-wrap:wrap}.col{flex:1;min-width:280px}
 label{display:block;margin:8px 0 6px}
 .input,textarea,select{width:100%;padding:12px 14px;border:none;border-radius:12px;background:rgba(255,255,255,.08);color:#fff;outline:none}
@@ -222,18 +236,23 @@ button{padding:12px 14px;border:none;border-radius:12px;color:#fff;cursor:pointe
 button:hover{transform:translateY(-1px);filter:brightness(1.06)}
 .btn-prim{background:linear-gradient(135deg,var(--vio),var(--cyan))}
 .btn-green{background:var(--green)}.btn-amber{background:var(--amber);color:#111}.btn-cyan{background:var(--cyan)}.btn-red{background:var(--red)}
-.kv{opacity:.85;font-size:13px}.badge{display:inline-block;padding:6px 10px;border-radius:999px;font-size:12px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);margin-left:8px}
+.badge{display:inline-block;padding:6px 10px;border-radius:999px;font-size:12px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);margin-left:8px}
 .hidden{display:none}hr{border:none;height:1px;background:var(--border);margin:16px 0}
 #countdown{font-weight:700}
 pre{background:rgba(255,255,255,.06);padding:12px;border-radius:12px;overflow:auto;max-height:260px}
+.topbar{display:flex;align-items:center;justify-content:space-between}
 </style></head>
 <body>
 <div class="container">
-  <h1>⚡ Cyberland Premium Dashboard
-    <span id="autoState" class="badge">Auto Update: ...</span>
-    <span id="aiState" class="badge">AI: ...</span>
-    <span id="updState" class="badge">Update: idle</span>
-  </h1>
+  <div class="topbar">
+    <h1>⚡ Cyberland Premium Dashboard
+      <span id="autoState" class="badge">Auto: ...</span>
+      <span id="aiState" class="badge">AI: ...</span>
+      <span id="updState" class="badge">Update: idle</span>
+    </h1>
+    <div>Logged in as <b>${username}</b> • <a href="/logout" style="color:#93c5fd">Logout</a></div>
+  </div>
+
   <div class="tabs">
     <div class="tab active" data-tab="updates">Updates</div>
     <div class="tab" data-tab="server">Server</div>
@@ -246,13 +265,14 @@ pre{background:rgba(255,255,255,.06);padding:12px;border-radius:12px;overflow:au
       <div class="col"><label>Update Duration (minutes)</label><input id="minutes" class="input" type="number" min="1" placeholder="e.g., 5"/></div>
       <div class="col"><label>Reason for Update</label><textarea id="reason" rows="3" placeholder="Bug fixes, performance, features..."></textarea></div>
     </div>
-    <div style="margin-top:8px">
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn-prim" onclick="startUpdate()">🚀 Start Update</button>
       <button class="btn-green" onclick="finishUpdate()">✅ Finish Update</button>
       <button class="btn-amber" onclick="toggleAuto()">🔄 Toggle Auto Update</button>
       <button class="btn-cyan" onclick="toggleAI()">🤖 Toggle AI</button>
+      <button class="btn-red" onclick="refreshCommands()">♻️ Refresh Slash Commands</button>
     </div>
-    <p class="kv">Live countdown: <span id="countdown">—</span></p>
+    <p style="opacity:.85;margin-top:10px">Live countdown: <b id="countdown">—</b></p>
   </div>
 
   <div id="tab-server" class="card hidden">
@@ -266,21 +286,14 @@ pre{background:rgba(255,255,255,.06);padding:12px;border-radius:12px;overflow:au
   </div>
 
   <div id="tab-commands" class="card hidden">
-    <h3>Slash Commands (Admin-only)</h3>
-    <p class="kv">/kick /ban /timeout /autorole /owostats /refresh</p>
-    <div class="row">
-      <div class="col"><label>Guild ID (override .env)</label><input id="guildOverride" class="input" placeholder="Optional Guild ID"/></div>
-      <div class="col" style="display:flex;align-items:flex-end;gap:8px">
-        <button class="btn-amber" onclick="refreshCommands()">♻️ Refresh Slash Commands</button>
-        <button class="btn-cyan" onclick="previewCommands()">👁️ View Current Commands</button>
-      </div>
-    </div>
-    <pre id="cmdList"></pre>
+    <h3>Slash Commands</h3>
+    <p class="kv">/kick /ban /timeout /autorole /owostats /refresh (Admins only)</p>
+    <pre id="cmdList">Loading...</pre>
   </div>
 
   <div id="tab-settings" class="card hidden">
     <h3>AI Settings</h3>
-    <p class="kv">AI replies in the configured channel as normal messages (no embeds).</p>
+    <p>AI replies in <code>CHANNEL_ID</code> as normal messages (no embeds).</p>
   </div>
 </div>
 
@@ -293,7 +306,7 @@ tabs.forEach(t=>t.onclick=()=>{
 });
 async function badges(){
   const s = await fetch('/api/state').then(r=>r.json());
-  document.getElementById('autoState').innerText='Auto Update: '+(s.autoUpdate?'ON':'OFF');
+  document.getElementById('autoState').innerText='Auto: '+(s.autoUpdate?'ON':'OFF');
   document.getElementById('aiState').innerText='AI: '+(s.aiEnabled?'ON':'OFF');
   document.getElementById('roleId').value=s.autoroleId||'';
 }
@@ -308,9 +321,9 @@ async function toggleAuto(){ const r=await fetch('/api/toggle-auto',{method:'POS
 async function toggleAI(){ const r=await fetch('/api/toggle-ai',{method:'POST'}).then(r=>r.json()); alert('AI is now '+(r.aiEnabled?'ON':'OFF')); badges(); }
 async function saveAutorole(){ const roleId=document.getElementById('roleId').value.trim(); const r=await fetch('/api/autorole',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({roleId})}).then(r=>r.json()); alert(r.success?'Autorole saved.':'Failed to save.'); }
 async function pollStatus(){ const d=await fetch('/api/server-status').then(r=>r.json()); document.getElementById('mcStatus').innerText=d.online?('🟢 Online — Players: '+d.players+' | Ping: '+d.ping+'ms'):'🔴 Offline'; }
-async function refreshCommands(){ const gid=document.getElementById('guildOverride').value.trim(); await fetch('/api/refresh-commands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({guildId:gid||null})}); alert('Slash commands refresh requested.'); previewCommands(); }
-async function previewCommands(){ const gid=document.getElementById('guildOverride').value.trim(); const data=await fetch('/api/commands'+(gid?('?guildId='+gid):'')).then(r=>r.json()).catch(()=>({error:'Fetch failed'})); document.getElementById('cmdList').textContent=JSON.stringify(data,null,2); }
-badges(); pollStatus(); setInterval(pollStatus,10000);
+async function refreshCommands(){ await fetch('/api/refresh-commands',{method:'POST'}); alert('Slash commands refresh requested.'); loadCmds(); }
+async function loadCmds(){ const data=await fetch('/api/commands').then(r=>r.json()).catch(()=>({error:'Fetch failed'})); document.getElementById('cmdList').textContent=JSON.stringify(data,null,2); }
+badges(); pollStatus(); loadCmds(); setInterval(pollStatus,10000);
 
 // Live countdown (no refresh)
 async function tick(){
@@ -326,27 +339,43 @@ setInterval(tick, 1000); setTimeout(tick, 200);
 </script>
 </body></html>`;
 
-// routes
-app.get("/", (req, res) => {
-  if (!req.session.loggedIn) return res.send(loginHTML);
-  res.send(dashHTML());
+// middleware
+function requireAuth(req, res, next) {
+  if (req.session?.loggedIn) return next();
+  res.redirect("/login");
+}
+
+app.get("/login", (req, res) => {
+  res.send(loginHTML.replace("{{ERR}}", ""));
 });
 app.post("/login", (req, res) => {
-  if ((req.body.password || "") === ADMIN_PASSWORD) {
+  const u = (req.body.username || "").trim().toLowerCase();
+  const p = req.body.password || "";
+  if (USERS.has(u) && USERS.get(u) === p) {
     req.session.loggedIn = true;
-    res.redirect("/");
-  } else res.status(403).send("<h2 style='color:red;font-family:sans-serif;margin:30px;'>Invalid Password</h2>");
+    req.session.username = u;
+    return res.redirect("/");
+  }
+  res.send(loginHTML.replace("{{ERR}}", "Invalid credentials."));
+});
+app.get("/logout", (req, res) => {
+  req.session.destroy(()=>{});
+  res.redirect("/login");
 });
 
-// state endpoints
-app.get("/api/state", (_req, res) => res.json({ autoUpdate, aiEnabled, autoroleId }));
-app.get("/api/update-state", (_req, res) => res.json(updateState));
-app.post("/api/toggle-ai", (_req, res) => { aiEnabled = !aiEnabled; res.json({ aiEnabled }); });
-app.post("/api/toggle-auto", (_req, res) => { autoUpdate = !autoUpdate; res.json({ autoUpdate }); });
-app.post("/api/autorole", (req, res) => { autoroleId = (req.body.roleId || "").trim() || null; res.json({ success: true, autoroleId }); });
+app.get("/", requireAuth, (req, res) => {
+  res.send(dashHTML(req.session.username || "admin"));
+});
+
+// state
+app.get("/api/state", requireAuth, (_req, res) => res.json({ autoUpdate, aiEnabled, autoroleId }));
+app.get("/api/update-state", requireAuth, (_req, res) => res.json(updateState));
+app.post("/api/toggle-ai", requireAuth, (_req, res) => { aiEnabled = !aiEnabled; res.json({ aiEnabled }); });
+app.post("/api/toggle-auto", requireAuth, (_req, res) => { autoUpdate = !autoUpdate; res.json({ autoUpdate }); });
+app.post("/api/autorole", requireAuth, (req, res) => { autoroleId = (req.body.roleId || "").trim() || null; res.json({ success: true, autoroleId }); });
 
 // mc status
-app.get("/api/server-status", async (_req, res) => {
+app.get("/api/server-status", requireAuth, async (_req, res) => {
   try {
     const st = await mcu.statusBedrock(MINECRAFT_IP, MINECRAFT_PORT, { timeout: 4000 });
     res.json({ online: true, players: st.players.online, ping: st.roundTripLatency });
@@ -355,11 +384,11 @@ app.get("/api/server-status", async (_req, res) => {
   }
 });
 
-// ====== Manual Update API (instant, countdown, completion) ======
+// ====== Manual Update Flow ======
 async function startUpdateFlow({ minutes, reason, auto }) {
   const ch = await client.channels.fetch(CHANNEL_ID);
 
-  // set state immediately for dashboard
+  // set state immediately for dashboard (so countdown starts at once)
   const now = Date.now();
   updateState = {
     active: true, auto, reason,
@@ -368,10 +397,12 @@ async function startUpdateFlow({ minutes, reason, auto }) {
     minutes
   };
 
+  // instant purge + lock + premium embed
   await purgeChannel(ch);
   await lockChannel(ch, true);
   await ch.send({ content: "@everyone", embeds: [updatingEmbed({ minutes, reason, auto })] });
 
+  // schedule finish
   if (manualUpdateTimer) clearTimeout(manualUpdateTimer);
   manualUpdateTimer = setTimeout(async () => {
     await finishUpdateFlow({ auto });
@@ -380,16 +411,17 @@ async function startUpdateFlow({ minutes, reason, auto }) {
 
 async function finishUpdateFlow({ auto }) {
   const ch = await client.channels.fetch(CHANNEL_ID);
+  // purge then unlock then premium "completed"
   await purgeChannel(ch);
   await lockChannel(ch, false);
-  const timeText = `Today at ${moment().tz("Asia/Dhaka").format("h:mm A")}`;
+  const timeText = moment().tz(TZ).format("MMM D, h:mm A");
   await ch.send({ content: "@everyone", embeds: [updatedEmbed({ auto, completedAtText: timeText })] });
-
   updateState = { active: false, auto: false, reason: "", startedAt: 0, endsAt: 0, minutes: 0 };
   if (manualUpdateTimer) clearTimeout(manualUpdateTimer);
 }
 
-app.post("/api/start-update", async (req, res) => {
+// routes for manual control
+app.post("/api/start-update", requireAuth, async (req, res) => {
   try {
     const minutes = Math.max(1, Number(req.body.minutes || 1));
     const reason = (req.body.reason || "").toString().slice(0, 1000);
@@ -398,14 +430,14 @@ app.post("/api/start-update", async (req, res) => {
   } catch (e) { console.error("start-update:", e.message); res.json({ success: false, error: e.message }); }
 });
 
-app.post("/api/finish-update", async (_req, res) => {
+app.post("/api/finish-update", requireAuth, async (_req, res) => {
   try {
     await finishUpdateFlow({ auto: false });
     res.json({ success: true });
   } catch (e) { console.error("finish-update:", e.message); res.json({ success: false, error: e.message }); }
 });
 
-// ====== Slash Commands (admin-only) ======
+// ====== Slash Commands (Admins only) ======
 const slashCommands = [
   {
     name: "kick",
@@ -471,7 +503,7 @@ async function deployCommands({ guildId = "" } = {}, attempt = 1) {
       return { scope: "guild", guildId: gid };
     } else {
       await rest.put(Routes.applicationCommands(appId), { body: slashCommands });
-      console.log("🌐 Slash commands deployed globally (may take up to 1h).");
+      console.log("🌐 Slash commands deployed globally (can take time).");
       return { scope: "global" };
     }
   } catch (e) {
@@ -484,22 +516,19 @@ async function deployCommands({ guildId = "" } = {}, attempt = 1) {
   }
 }
 
-// dashboard: refresh + list commands
-app.post("/api/refresh-commands", async (req, res) => {
+app.post("/api/refresh-commands", requireAuth, async (_req, res) => {
   try {
-    const gid = (req.body.guildId || "").trim();
-    const out = await deployCommands({ guildId: gid });
+    const out = await deployCommands({ guildId: GUILD_ID || "" });
     res.json({ success: true, ...out });
   } catch (e) { res.json({ success: false, error: e.message }); }
 });
-app.get("/api/commands", async (req, res) => {
+app.get("/api/commands", requireAuth, async (_req, res) => {
   try {
     const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
     const appId = client?.user?.id;
     if (!appId) return res.json({ error: "Client not ready" });
-    const gid = (req.query.guildId || "").trim();
-    const route = gid || GUILD_ID
-      ? Routes.applicationGuildCommands(appId, gid || GUILD_ID)
+    const route = GUILD_ID
+      ? Routes.applicationGuildCommands(appId, GUILD_ID)
       : Routes.applicationCommands(appId);
     const data = await rest.get(route);
     res.json(data);
@@ -512,16 +541,16 @@ cron.schedule("0 15 * * *", async () => {
   try {
     await startUpdateFlow({ minutes: 5, reason: "Scheduled daily maintenance", auto: true });
   } catch (e) { console.error("auto-start:", e.message); }
-}, { timezone: "Asia/Dhaka" });
+}, { timezone: TZ });
 
 cron.schedule("5 15 * * *", async () => {
   if (!autoUpdate) return;
   try {
     await finishUpdateFlow({ auto: true });
   } catch (e) { console.error("auto-finish:", e.message); }
-}, { timezone: "Asia/Dhaka" });
+}, { timezone: TZ });
 
-// ====== Interactions (runtime admin check) ======
+// ====== Interactions ======
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   if (!isAdmin(interaction.member)) {
@@ -570,7 +599,7 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-// ====== Autorole ======
+// ====== Autorole on join ======
 client.on("guildMemberAdd", async (member) => {
   try {
     if (!autoroleId) return;
@@ -581,7 +610,7 @@ client.on("guildMemberAdd", async (member) => {
   } catch (e) { console.error("autorole:", e.message); }
 });
 
-// ====== AI Chat (friendly, normal reply) ======
+// ====== AI Chat (normal replies) ======
 let aiQueue = Promise.resolve();
 client.on("messageCreate", async (message) => {
   try {
@@ -600,7 +629,7 @@ client.on("messageCreate", async (message) => {
   } catch (e) { console.error("AI error:", e.message); }
 });
 
-// ====== Ready: deploy commands ======
+// ====== Ready: deploy slash commands ======
 client.on("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   try {
@@ -608,9 +637,8 @@ client.on("ready", async () => {
   } catch (e) { console.error("Register commands failed:", e.message); }
 });
 
-// ====== Login + HTTP ======
+// ====== Bootstrap ======
 client.login(DISCORD_TOKEN);
 const server = express();
 server.use((req, res, next) => app(req, res, next));
 server.listen(PORT, () => console.log(`🌐 Dashboard running on PORT ${PORT}`));
-
