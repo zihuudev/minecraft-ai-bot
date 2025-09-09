@@ -1,15 +1,13 @@
-// ====== ENVIRONMENT ======
 require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
 const session = require("express-session");
 const axios = require("axios");
 const cron = require("node-cron");
+const moment = require("moment-timezone");
 const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 const util = require("minecraft-server-util");
-const http = require("http");
 
-// ====== CONFIG ======
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -17,37 +15,47 @@ const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 const MINECRAFT_IP = "play.cyberland.pro";
 const MINECRAFT_PORT = 19132;
-const RAILWAY_URL = process.env.RAILWAY_STATIC_URL;
 
-// ====== DISCORD CLIENT ======
 const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+    ],
 });
 
-// ====== AI CHAT ======
+// ====== AI Chat ======
 async function queryOpenAI(prompt) {
     try {
-        const res = await axios.post(
+        const response = await axios.post(
             "https://api.openai.com/v1/chat/completions",
             {
                 model: "gpt-3.5-turbo",
                 messages: [{ role: "user", content: prompt }],
+                max_tokens: 500,
+                temperature: 0.7,
             },
             {
                 headers: {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${OPENAI_API_KEY}`,
                 },
+                timeout: 30000,
             }
         );
-        return res.data.choices[0].message.content.trim();
-    } catch (err) {
-        console.error("OpenAI Error:", err.response?.data || err.message);
+
+        if (response.data?.choices?.length > 0) {
+            return response.data.choices[0].message.content.trim();
+        } else {
+            return "⚠️ AI didn't return any response. Please try again.";
+        }
+    } catch (error) {
+        console.error("🔴 OpenAI API Error:", error.response?.data || error.message);
         return "⚠️ AI is temporarily unavailable. Please try again later.";
     }
 }
 
-// ====== EXPRESS APP ======
+// ====== Express Dashboard ======
 const app = express();
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -59,9 +67,7 @@ app.use(
     })
 );
 
-// ====== DASHBOARD HTML ======
-const dashboardHTML = `
-<!DOCTYPE html>
+const dashboardHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -106,13 +112,11 @@ getStatus();
 setInterval(getStatus, 10000);
 </script>
 </body>
-</html>
-`;
+</html>`;
 
-// ====== ROUTES ======
+// ====== Routes ======
 app.get("/", (req, res) => {
-    if (!req.session.loggedIn)
-        return res.send(`<form method='POST' action='/login'><input type='password' name='password' placeholder='Enter Admin Password'><button type='submit'>Login</button></form>`);
+    if (!req.session.loggedIn) return res.send(`<form method='POST' action='/login'><input type='password' name='password'><button type='submit'>Login</button></form>`);
     res.send(dashboardHTML);
 });
 
@@ -128,13 +132,11 @@ app.post("/login", (req, res) => {
 let autoUpdate = true;
 let manualUpdateTimeout = null;
 
-// ====== START MANUAL UPDATE ======
 app.post("/api/start-update", async (req, res) => {
     try {
         const { minutes } = req.body;
         const channel = await client.channels.fetch(CHANNEL_ID);
         await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: false });
-
         const embed = new EmbedBuilder()
             .setColor("Gold")
             .setTitle("🚀 Manual Update Started")
@@ -162,7 +164,6 @@ app.post("/api/start-update", async (req, res) => {
     }
 });
 
-// ====== FINISH UPDATE ======
 app.post("/api/finish-update", async (req, res) => {
     try {
         const channel = await client.channels.fetch(CHANNEL_ID);
@@ -186,7 +187,6 @@ app.post("/api/toggle-auto", (req, res) => {
     res.json({ autoUpdate });
 });
 
-// ====== MINECRAFT STATUS ======
 app.get("/api/server-status", async (req, res) => {
     try {
         const status = await util.status(MINECRAFT_IP, MINECRAFT_PORT);
@@ -196,7 +196,7 @@ app.get("/api/server-status", async (req, res) => {
     }
 });
 
-// ====== AUTO UPDATE ======
+// ====== Auto Update ======
 cron.schedule("0 15 * * *", async () => {
     if (!autoUpdate) return;
     const channel = await client.channels.fetch(CHANNEL_ID);
@@ -223,7 +223,7 @@ cron.schedule("5 15 * * *", async () => {
     await channel.send({ content: "@everyone", embeds: [embed] });
 }, { timezone: "Asia/Dhaka" });
 
-// ====== DISCORD AI CHAT ======
+// ====== AI Chat Handler ======
 client.on("messageCreate", async (message) => {
     if (message.author.bot || message.channel.id !== CHANNEL_ID) return;
     await message.channel.sendTyping();
@@ -231,19 +231,9 @@ client.on("messageCreate", async (message) => {
     message.reply(reply);
 });
 
-// ====== BOT READY ======
+// ====== Bot Ready ======
 client.on("ready", () => console.log(`✅ Logged in as ${client.user.tag}`));
 
-// ====== LOGIN DISCORD BOT ======
+// ====== Start Bot ======
 client.login(DISCORD_TOKEN);
-
-// ====== EXPRESS SERVER START ======
-app.listen(PORT, () => console.log(`🌐 Dashboard Running: http://localhost:${PORT}`));
-
-// ====== RAILWAY SELF-PING ======
-setInterval(() => {
-    if (RAILWAY_URL) {
-        http.get(`https://${RAILWAY_URL}`);
-        console.log("🔄 Keep-alive ping sent!");
-    }
-}, 60000);
+app.listen(PORT, () => console.log(`🌐 Dashboard: http://localhost:${PORT}`));
