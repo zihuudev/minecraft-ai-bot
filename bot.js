@@ -149,7 +149,7 @@ function updatingEmbed({ minutes, reason, auto = false }) {
     { name: "🎉 Status", value: "Bot is updating…", inline: true },
     { name: "🔒 Chat", value: "Locked", inline: true },
     { name: "⚡ Server Performance", value: "Fast", inline: true },
-    { name: "⏰ Next update", value: `in ${minutes} minutes`, inline: true },
+    { name: "⏰ Update Duration", value: `in ${minutes} minutes`, inline: true },
     { name: "🧠 Update system", value: auto ? "Runs automatically" : "Manual maintenance", inline: true },
     { name: "⚙️ Frequency", value: auto ? "Daily at 3:00 PM" : `One-time (${minutes}m)`, inline: true },
   );
@@ -163,7 +163,7 @@ function updatedEmbed({ auto = false, completedAtText }) {
     { name: "🎉 Status", value: "Bot is ready to use", inline: true },
     { name: "🔓 Chat", value: "Unlocked", inline: true },
     { name: "⚡ Server Performance", value: "Fast", inline: true },
-    { name: "⏰ Next update", value: auto ? "Tomorrow 3:00 PM" : "—", inline: true },
+    { name: "⏰ Update Duration", value: auto ? "Tomorrow 3:00 PM" : "—", inline: true },
     { name: "🧠 Update system", value: auto ? "Active and running automatically" : "Manual complete", inline: true },
     { name: "⚙️ Frequency", value: auto ? "Every day" : "—", inline: true },
   );
@@ -613,3 +613,4 @@ client.login(DISCORD_TOKEN);
 const server = express();
 server.use((req, res, next) => app(req, res, next));
 server.listen(PORT, () => console.log(`🌐 Dashboard running on PORT ${PORT}`));
+
