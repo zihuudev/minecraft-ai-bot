@@ -245,7 +245,7 @@ h1{margin:0 0 14px;font-size:22px;letter-spacing:.4px}
 
 const dashHTML = (u) => `<!doctype html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Cyberland Premium Dashboard</title>
+<title>Cyberland Ai Dashboard</title>
 <style>
 :root{
   --bg:#0b1220;--glass:rgba(255,255,255,.06);--b:rgba(255,255,255,.12);
@@ -285,7 +285,7 @@ pre{background:rgba(255,255,255,.06);padding:12px;border-radius:12px;overflow:au
 <div class="container">
   <div class="top">
     <h2 style="display:flex;align-items:center;gap:10px">
-      ⚡ Cyberland Premium Dashboard
+      Cyberland Ai Dashboard
       <span id="autoBadge" class="badge"><span class="dot"></span>Auto: …</span>
       <span id="aiBadge" class="badge"><span class="dot"></span>AI: …</span>
       <span id="updBadge" class="badge"><span class="dot"></span>Update: idle</span>
@@ -739,4 +739,5 @@ client.login(DISCORD_TOKEN);
 const server = express();
 server.use((req,res,next)=>app(req,res,next));
 server.listen(PORT, () => console.log(`🌐 Dashboard running on PORT ${PORT}`));
+
 
