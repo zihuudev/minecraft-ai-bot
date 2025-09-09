@@ -1,10 +1,3 @@
-// ================= Cyberland Ultra-Premium Bot (Single File) =================
-// Features: Ultra-premium animated dashboard + login (3 users), resilient AI,
-// manual & auto update with instant purge/lock/unlock + premium embeds, Minecraft
-// Bedrock live status, autorole, admin-only slash commands, and command refresh.
-// Timezone: Asia/Dhaka (Auto update 3:00–3:05 PM daily)
-// Developed by Zihuu
-// ============================================================================
 
 require("dotenv").config();
 const express = require("express");
@@ -180,7 +173,7 @@ function updatingEmbed({ minutes, reason, auto }) {
     { name: "🔒 Channel", value: "Locked", inline: true },
     { name: "⏰ Duration", value: `${minutes} minute(s)`, inline: true },
     { name: "🧠 Mode", value: auto ? "Automatic (daily)" : "Manual", inline: true },
-    { name: "👨‍💻 Developer", value: "Zihuu", inline: true },
+    { name: "👨‍💻 Developer", value: "ZIHUU", inline: true },
   );
   if (reason) e.addFields({ name: "🛠️ Reason", value: reason });
   return e;
@@ -195,7 +188,7 @@ function updatedEmbed({ auto }) {
     { name: "🎉 Status", value: "Ready", inline: true },
     { name: "🔓 Channel", value: "Unlocked", inline: true },
     { name: "🧠 Mode", value: auto ? "Automatic (daily)" : "Manual", inline: true },
-    { name: "👨‍💻 Developer", value: "Zihuu", inline: true },
+    { name: "👨‍💻 Developer", value: "ZIHUU", inline: true },
   );
   return e;
 }
@@ -339,7 +332,7 @@ pre{background:rgba(255,255,255,.06);padding:12px;border-radius:12px;overflow:au
 
   <div id="tab-about" class="card hidden">
     <h3>About</h3>
-    <p>Developed by <b>Zihuu</b>. Ultra-premium embeds, dashboard, automation and AI.</p>
+    <p>Developed by <b>ZIHUU</b>. Best Ai</p>
   </div>
 </div>
 
@@ -746,3 +739,4 @@ client.login(DISCORD_TOKEN);
 const server = express();
 server.use((req,res,next)=>app(req,res,next));
 server.listen(PORT, () => console.log(`🌐 Dashboard running on PORT ${PORT}`));
+
