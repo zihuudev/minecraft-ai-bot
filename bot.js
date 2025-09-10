@@ -1,25 +1,25 @@
-// ===================================================================================
+// ================================================================
 // Cyberland Ultra-Premium All-in-One bot.js
-// - Ultra premium animated dashboard + login
-// - AI chat (OpenAI) restricted to one channel (CHANNEL_ID)
-// - Manual update (purge -> lock -> send animated premium embed -> finish -> unlock)
-// - Auto updates twice daily (11:20-11:25 & 15:00-15:05 Asia/Dhaka)
-// - Minecraft Bedrock status
-// - 3 user logins: zihuu, shahin, mainuddin (password: cyberlandai90x90x90)
-// - Uses environment variables for secrets (do NOT commit them)
-// ===================================================================================
+// - Single-file: Discord bot + ultra animated dashboard + socket.io
+// - Manual update flow: purge -> lock -> premium GIF embed -> finish -> unlock
+// - Auto updates: 11:20-11:25 & 15:00-15:05 (Asia/Dhaka)
+// - AI chat (OpenAI) only in CHANNEL_ID
+// - 3 admin users (zihuu, shahin, mainuddin) password: cyberlandai90x90x90
+// ================================================================
 
 require('dotenv').config();
+
 const express = require('express');
 const bodyParser = require('body-parser');
 const session = require('express-session');
+const http = require('http');
+const { Server: IOServer } = require('socket.io');
 const axios = require('axios');
 const cron = require('node-cron');
 const moment = require('moment-timezone');
 const mcu = require('minecraft-server-util');
 const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
 
-// ------------------------- CONFIG -------------------------
 const PORT = process.env.PORT || 3000;
 const TZ = 'Asia/Dhaka';
 
@@ -28,59 +28,56 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const CHANNEL_ID = process.env.CHANNEL_ID || '';
 
-const UPDATE_GIF_URL = process.env.UPDATE_GIF_URL || '';   // optional GIF shown during update
-const FINISH_GIF_URL = process.env.FINISH_GIF_URL || '';   // optional GIF shown on finish
-const SESSION_SECRET = process.env.SESSION_SECRET || 'cyberland_ultra_session_secret';
+const UPDATE_GIF_URL = process.env.UPDATE_GIF_URL || '';   // shown during update embed (image)
+const FINISH_GIF_URL = process.env.FINISH_GIF_URL || '';   // shown on finish embed (image)
+const SESSION_SECRET = process.env.SESSION_SECRET || 'cyberland_ultra_secret_please_set_env';
 
-// Minecraft Bedrock defaults (your server)
 const MINECRAFT_IP = 'play.cyberland.pro';
 const MINECRAFT_PORT = 19132;
 
-// ------------------------- DISCORD CLIENT -------------------------
+// ---------- Discord client ----------
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.MessageContent,
   ],
-  partials: [ Partials.Channel, Partials.Message, Partials.GuildMember ]
+  partials: [Partials.Channel, Partials.Message, Partials.GuildMember],
 });
 
-// ------------------------- RUNTIME STATE -------------------------
+// runtime state
 let aiEnabled = true;
 let autoUpdate = true;
 let autoroleId = null;
 let updateTimer = null;
 let updateState = { active:false, auto:false, reason:'', startedAt:0, endsAt:0, minutes:0 };
 
-const RETRYABLE = new Set([408,409,429,500,502,503,504]);
-
-// short conversation memory
+// small memory per user for context
 const userContexts = new Map();
 const MAX_TURNS = 10;
 
-// ------------------------- HELPERS -------------------------
+// ---------- helpers ----------
 function nowTs(){ return Date.now(); }
 function fmtTS(ts){ return moment(ts).tz(TZ).format('MMM D, YYYY h:mm A'); }
 
-// Robust purge: bulkDelete with fallback to per-message deletes
 async function purgeChannel(channel){
   try {
     if (!channel || !channel.isTextBased?.()) return;
-    let got;
+    // repeat until no messages or fetch returns empty
+    let fetched;
     do {
-      got = await channel.messages.fetch({ limit: 100 });
-      if (!got || got.size === 0) break;
+      fetched = await channel.messages.fetch({ limit: 100 });
+      if (!fetched || fetched.size === 0) break;
       try {
-        await channel.bulkDelete(got, true);
-      } catch (bulkErr) {
-        // fallback: delete one by one
-        for (const [, msg] of got) {
+        await channel.bulkDelete(fetched, true);
+      } catch (err) {
+        // fallback: delete individually to maximize removal
+        for (const [, msg] of fetched) {
           try { await msg.delete(); } catch(_) {}
         }
       }
-    } while (got.size >= 2);
+    } while (fetched.size >= 2);
   } catch (e) {
     console.error('purgeChannel error:', e?.message || e);
   }
@@ -95,8 +92,9 @@ async function lockChannel(channel, lock){
   }
 }
 
-// ------------------------- OPENAI / AI -------------------------
-async function chatOpenAI(messages, attempt = 1){
+// ---------- OpenAI / AI ----------
+const RETRYABLE = new Set([408,409,429,500,502,503,504]);
+async function chatOpenAI(messages, attempt=1){
   if (!OPENAI_API_KEY) return '❌ OpenAI API key not configured.';
   try {
     const res = await axios.post(
@@ -104,17 +102,15 @@ async function chatOpenAI(messages, attempt = 1){
       { model: OPENAI_MODEL, messages, temperature: 0.7, max_tokens: 900 },
       { headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 70000, validateStatus: ()=>true }
     );
-    if (res.status >= 200 && res.status < 300) return res.data?.choices?.[0]?.message?.content?.trim() || '...';
+    if (res.status >= 200 && res.status < 300) return res.data?.choices?.[0]?.message?.content?.trim() || '';
     if (res.status === 401) return '❌ Invalid OpenAI API Key.';
     if (RETRYABLE.has(res.status) && attempt < 3) {
-      await new Promise(r=>setTimeout(r, 800 * attempt));
-      return chatOpenAI(messages, attempt+1);
+      await new Promise(r=>setTimeout(r, 700 * attempt)); return chatOpenAI(messages, attempt+1);
     }
     return '⚠️ AI temporarily unavailable. Try again later.';
   } catch (e) {
-    if (['ECONNABORTED','ETIMEDOUT','ECONNRESET'].includes(e?.code) && attempt < 3) {
-      await new Promise(r=>setTimeout(r, 800 * attempt));
-      return chatOpenAI(messages, attempt+1);
+    if (['ECONNABORTED','ETIMEDOUT','ECONNRESET'].includes(e?.code) && attempt<3) {
+      await new Promise(r=>setTimeout(r, 700 * attempt)); return chatOpenAI(messages, attempt+1);
     }
     console.error('chatOpenAI err:', e?.message || e);
     return '⚠️ AI temporarily unavailable. Try again later.';
@@ -122,7 +118,7 @@ async function chatOpenAI(messages, attempt = 1){
 }
 
 function buildContext(userId, username, userMsg){
-  const sys = { role:'system', content: 'You are Cyberland assistant. Be friendly, helpful, concise, and give Minecraft-specific guidance when asked.' };
+  const sys = { role:'system', content: 'You are Cyberland assistant — friendly, concise, helpful, give Minecraft-specific advice when appropriate.' };
   const out = [sys];
   const hist = userContexts.get(userId) || [];
   for (const t of hist.slice(-MAX_TURNS)) {
@@ -139,61 +135,47 @@ function saveContext(userId, q, a){
   userContexts.set(userId, arr);
 }
 
-// chunked reply to feel like typing
 async function typeAndReply(message, fullText){
   if (!fullText) { await message.reply('...'); return; }
   const words = fullText.split(/\s+/);
   const chunks = []; let buf = '';
   for (const w of words) {
-    const cand = (buf ? buf+' ' : '') + w;
-    if (cand.length > 200) { chunks.push(buf); buf = w; } else buf = cand;
+    const cand = (buf ? buf + ' ' : '') + w;
+    if (cand.length > 180) { chunks.push(buf); buf = w; } else buf = cand;
   }
   if (buf) chunks.push(buf);
   let first = true;
   for (const c of chunks) {
     try {
       await message.channel.sendTyping();
-      if (first) { await message.reply(c); first = false; } else { await message.channel.send(c); }
-      await new Promise(r => setTimeout(r, Math.min(800, Math.max(80, c.length * 6))));
+      if (first) { await message.reply(c); first = false; }
+      else await message.channel.send(c);
+      await new Promise(r=>setTimeout(r, Math.min(900, Math.max(80, c.length * 6))));
     } catch (e) {
-      console.error('typeAndReply error:', e?.message || e);
+      console.error('typeAndReply send error:', e?.message || e);
     }
   }
 }
 
-// ------------------------- EMBED STYLES -------------------------
+// ---------- Embeds ----------
 function ultraEmbed(color, title, description){
-  return new EmbedBuilder()
-    .setColor(color)
-    .setTitle(title)
-    .setDescription(description)
-    .setFooter({ text: 'Developed by Zihuu • Cyberland' })
-    .setTimestamp();
+  return new EmbedBuilder().setColor(color).setTitle(title).setDescription(description).setFooter({ text: 'Developed by Zihuu • Cyberland' }).setTimestamp();
 }
-
 function nextUpdateWindowsString(){
   const now = moment().tz(TZ);
-  const today = now.clone().startOf('day');
-  const w1s = today.clone().add(11,'hours').add(20,'minutes'); // 11:20
-  const w1e = today.clone().add(11,'hours').add(25,'minutes'); // 11:25
-  const w2s = today.clone().add(15,'hours').add(0,'minutes');  // 15:00
-  const w2e = today.clone().add(15,'hours').add(5,'minutes');  // 15:05
-
-  if (now.isBefore(w1s)) {
-    return `${w1s.format('h:mm A')} - ${w1e.format('h:mm A')} & ${w2s.format('h:mm A')} - ${w2e.format('h:mm A')} (BDT)`;
-  } else if (now.isBefore(w2s)) {
-    return `${w2s.format('h:mm A')} - ${w2e.format('h:mm A')} (today)`;
-  } else {
-    const tm = today.clone().add(1,'day');
-    const tw1s = tm.clone().add(11,'hours').add(20,'minutes');
-    const tw1e = tm.clone().add(11,'hours').add(25,'minutes');
-    return `${tw1s.format('MMM D h:mm A')} - ${tw1e.format('h:mm A')} (next day)`;
-  }
+  const base = now.clone().startOf('day');
+  const w1s = base.clone().add(11,'hours').add(20,'minutes');
+  const w1e = base.clone().add(11,'hours').add(25,'minutes');
+  const w2s = base.clone().add(15,'hours').add(0,'minutes');
+  const w2e = base.clone().add(15,'hours').add(5,'minutes');
+  if (now.isBefore(w1s)) return `${w1s.format('h:mm A')} - ${w1e.format('h:mm A')} & ${w2s.format('h:mm A')} - ${w2e.format('h:mm A')} (BDT)`;
+  if (now.isBefore(w2s)) return `${w2s.format('h:mm A')} - ${w2e.format('h:mm A')} (today)`;
+  const tm = base.clone().add(1,'day');
+  return `${tm.clone().add(11,'hours').add(20,'minutes').format('MMM D h:mm A')} - next windows`;
 }
-
 function updatingEmbed({ minutes, reason, auto }){
   const title = auto ? '⚡ Automatic Update — In Progress' : '🚀 Manual Update — In Progress';
-  const e = ultraEmbed(0xF59E0B, title, 'Maintenance in progress. We are optimizing the system.');
+  const e = ultraEmbed(0xF59E0B, title, 'Maintenance running — optimizing systems.');
   e.addFields(
     { name: '🎉 Status', value: 'Updating…', inline: true },
     { name: '🔓 Chat', value: 'Locked', inline: true },
@@ -202,13 +184,12 @@ function updatingEmbed({ minutes, reason, auto }){
     { name: '🤖 Update system', value: auto ? 'Automatic' : 'Manual', inline: true },
     { name: '⚙️ Frequency', value: '11:20-11:25 & 15:00-15:05 (BDT)', inline: true },
   );
-  if (reason) e.addFields({ name: '📝 Reason', value: reason, inline: false });
+  if (reason) e.addFields({ name: '📝 Reason', value: reason });
   if (UPDATE_GIF_URL) e.setImage(UPDATE_GIF_URL);
   return e;
 }
-
 function updatedEmbed({ auto, completedAt }){
-  const e = ultraEmbed(0x22C55E, '✅ You can now use the bot!', 'Update finished — everything is up and ready.');
+  const e = ultraEmbed(0x22C55E, '✅ You can now use the bot!', 'Update finished — everything is ready.');
   e.addFields(
     { name: '🎉 Status', value: 'Completed', inline: true },
     { name: '🔓 Chat', value: 'Unlocked', inline: true },
@@ -217,21 +198,21 @@ function updatedEmbed({ auto, completedAt }){
     { name: '🤖 Update system', value: auto ? 'Automatic' : 'Manual', inline: true },
     { name: '⚙️ Frequency', value: '11:20-11:25 & 15:00-15:05 (BDT)', inline: true }
   );
-  if (completedAt) e.addFields({ name: '✅ Completed At', value: completedAt, inline: false });
+  if (completedAt) e.addFields({ name: '✅ Completed At', value: completedAt });
   if (FINISH_GIF_URL) e.setImage(FINISH_GIF_URL);
   return e;
 }
 
-// ------------------------- UPDATE FLOW -------------------------
+// ---------- Update flow ----------
 async function startUpdateFlow({ minutes, reason, auto=false }){
-  if (!CHANNEL_ID) throw new Error('CHANNEL_ID is not set in environment.');
+  if (!CHANNEL_ID) throw new Error('CHANNEL_ID not set.');
   const ch = await client.channels.fetch(CHANNEL_ID).catch(()=>null);
-  if (!ch) throw new Error('Failed to fetch channel. Check CHANNEL_ID and bot permissions.');
+  if (!ch) throw new Error('Could not fetch channel.');
 
   const now = nowTs();
   updateState = { active:true, auto, reason, startedAt: now, endsAt: now + minutes*60000, minutes };
 
-  // Purge -> lock -> send embed (embed is posted after purge so it won't be removed)
+  // purge -> lock -> send embed
   await purgeChannel(ch);
   await lockChannel(ch, true);
   await ch.send({ content: '@everyone', embeds: [ updatingEmbed({ minutes, reason, auto }) ] });
@@ -243,11 +224,10 @@ async function startUpdateFlow({ minutes, reason, auto=false }){
 }
 
 async function finishUpdateFlow({ auto=false }){
-  if (!CHANNEL_ID) throw new Error('CHANNEL_ID is not set in environment.');
+  if (!CHANNEL_ID) throw new Error('CHANNEL_ID not set.');
   const ch = await client.channels.fetch(CHANNEL_ID).catch(()=>null);
-  if (!ch) throw new Error('Failed to fetch channel. Check CHANNEL_ID and bot permissions.');
+  if (!ch) throw new Error('Could not fetch channel.');
 
-  // purge -> unlock -> send finished embed
   await purgeChannel(ch);
   await lockChannel(ch, false);
   const completedAt = fmtTS(Date.now());
@@ -257,56 +237,69 @@ async function finishUpdateFlow({ auto=false }){
   if (updateTimer) { clearTimeout(updateTimer); updateTimer = null; }
 }
 
-// ------------------------- AUTO UPDATE SCHEDULE -------------------------
-// Window 1 start: 11:20  end: 11:25  (BDT)
-// Window 2 start: 15:00  end: 15:05  (BDT)
-cron.schedule('20 11 * * *', async () => { if (!autoUpdate) return; try { await startUpdateFlow({ minutes:5, reason: 'Auto window 11:20-11:25', auto:true }); } catch(e){ console.error('auto start1 err', e); } }, { timezone: TZ });
-cron.schedule('25 11 * * *', async () => { if (!autoUpdate) return; try { await finishUpdateFlow({ auto:true }); } catch(e){ console.error('auto finish1 err', e); } }, { timezone: TZ });
-cron.schedule('0 15 * * *', async () => { if (!autoUpdate) return; try { await startUpdateFlow({ minutes:5, reason: 'Auto window 15:00-15:05', auto:true }); } catch(e){ console.error('auto start2 err', e); } }, { timezone: TZ });
-cron.schedule('5 15 * * *', async () => { if (!autoUpdate) return; try { await finishUpdateFlow({ auto:true }); } catch(e){ console.error('auto finish2 err', e); } }, { timezone: TZ });
+// ---------- Auto updates (BDT) ----------
+cron.schedule('20 11 * * *', async () => {
+  if (!autoUpdate) return;
+  try { await startUpdateFlow({ minutes:5, reason:'Auto window 11:20-11:25', auto:true }); } catch(e){ console.error('auto start1 err', e); }
+}, { timezone: TZ });
 
-// ------------------------- WEB DASHBOARD -------------------------
+cron.schedule('25 11 * * *', async () => {
+  if (!autoUpdate) return;
+  try { await finishUpdateFlow({ auto:true }); } catch(e){ console.error('auto finish1 err', e); }
+}, { timezone: TZ });
+
+cron.schedule('0 15 * * *', async () => {
+  if (!autoUpdate) return;
+  try { await startUpdateFlow({ minutes:5, reason:'Auto window 15:00-15:05', auto:true }); } catch(e){ console.error('auto start2 err', e); }
+}, { timezone: TZ });
+
+cron.schedule('5 15 * * *', async () => {
+  if (!autoUpdate) return;
+  try { await finishUpdateFlow({ auto:true }); } catch(e){ console.error('auto finish2 err', e); }
+}, { timezone: TZ });
+
+// ---------- Express + Socket.io Dashboard ----------
 const app = express();
+const server = http.createServer(app);
+const io = new IOServer(server);
+
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended:true }));
 app.use(session({ secret: SESSION_SECRET, resave:false, saveUninitialized:true, cookie: { maxAge: 24*60*60*1000 } }));
 
-// fixed 3-user login
+// fixed 3 users
 const USERS = new Map([
   ['zihuu','cyberlandai90x90x90'],
   ['shahin','cyberlandai90x90x90'],
   ['mainuddin','cyberlandai90x90x90'],
 ]);
 
-// ---------------- HTML (ultra premium login + dashboard) ----------------
-// Note: keep HTML inline so this remains one-file. The front-end includes:
-// - particle background (canvas) with mouse interaction
-// - animated loading screen on login
-// - ultra status cards, morphing gradient, progress ring, next window display
-// - control buttons for manual update, finish, toggle auto, toggle AI, set autorole
-const loginHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+// inline ultra-premium HTML pages (login + dashboard) — includes particle canvas + animations + socket.io client
+const loginHTML = `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Cyberland Admin Login</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
 <style>
-:root{--accent1:#7c3aed;--accent2:#06b6d4;--glass:rgba(255,255,255,0.02);--muted:rgba(255,255,255,0.04)}
+:root{--a1:#7c3aed;--a2:#06b6d4;}
 *{box-sizing:border-box}
-html,body{height:100%;margin:0;font-family:Inter,system-ui;background:linear-gradient(180deg,#020617,#071026);color:#EAF2FF;overflow:hidden}
+html,body{height:100%;margin:0;font-family:Inter,system-ui;background:#050617;color:#EAF2FF;overflow:hidden}
 .canvas{position:fixed;inset:0;z-index:0}
-.center{min-height:100vh;display:grid;place-items:center;position:relative;z-index:2;padding:20px}
-.card{width:100%;max-width:980px;padding:28px;border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);border:1px solid var(--muted);backdrop-filter:blur(12px);box-shadow:0 40px 120px rgba(0,0,0,.6);display:flex;gap:18px;align-items:center}
+.center{position:relative;z-index:2;min-height:100vh;display:grid;place-items:center;padding:20px}
+.card{width:94%;max-width:980px;padding:28px;border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);border:1px solid rgba(255,255,255,0.03);backdrop-filter:blur(12px);box-shadow:0 40px 120px rgba(0,0,0,.6);display:flex;gap:18px;align-items:center}
 .left{flex:1}
 .right{width:420px}
 .logo{font-weight:800;font-size:20px}
 .h{font-size:24px;margin-top:6px}
 .input{width:100%;padding:12px;border-radius:12px;border:none;background:rgba(255,255,255,0.03);color:#fff;margin-top:12px;outline:none}
-.btn{width:100%;padding:12px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--accent1),var(--accent2));color:#fff;margin-top:14px;cursor:pointer;font-weight:700;box-shadow:0 18px 44px rgba(124,58,237,.12)}
-.small{opacity:.85;margin-top:12px}
+.btn{width:100%;padding:12px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--a1),var(--a2));color:#fff;margin-top:14px;cursor:pointer;font-weight:700;box-shadow:0 18px 44px rgba(124,58,237,.12)}
+.small{opacity:.85;margin-top:10px}
 .err{color:#ff8888;margin-top:8px}
-.loading{display:flex;gap:8px;align-items:center;justify-content:center;flex-direction:column}
-.loaderDot{width:12px;height:12px;border-radius:50%;background:linear-gradient(90deg,var(--accent1),var(--accent2));animation:dot 1s infinite;}
+.loading{display:none;margin-top:12px;align-items:center;gap:8px;flex-direction:column}
+.loaderDot{width:12px;height:12px;border-radius:50%;background:linear-gradient(90deg,var(--a1),var(--a2));animation:dot 1s infinite}
 @keyframes dot{0%{transform:translateY(0)}50%{transform:translateY(-8px)}100%{transform:translateY(0)}}
 @media(max-width:900px){ .card{flex-direction:column} .left{display:none} }
-</style></head><body>
+</style></head>
+<body>
 <canvas id="bg" class="canvas"></canvas>
 <div class="center">
   <form class="card" method="POST" action="/login" onsubmit="onLogin(event)">
@@ -314,82 +307,47 @@ html,body{height:100%;margin:0;font-family:Inter,system-ui;background:linear-gra
       <div class="logo">CYBERLAND</div>
       <div class="h">Ultra Admin Dashboard</div>
       <div class="small">Authorized: <b>zihuu</b>, <b>shahin</b>, <b>mainuddin</b></div>
-      <div style="height:18px"></div>
-      <div class="small">Secure access — Animated UI & Live Monitoring</div>
+      <div style="height:12px"></div>
+      <div class="small">Secure admin panel • Animated UI</div>
     </div>
     <div class="right">
       <div style="font-weight:700">🔐 Login</div>
-      <input class="input" id="username" name="username" placeholder="Username" required />
-      <input class="input" id="password" name="password" type="password" placeholder="Password" required />
+      <input class="input" name="username" placeholder="Username" required />
+      <input class="input" name="password" type="password" placeholder="Password" required />
       <button class="btn" type="submit">Enter Dashboard</button>
-      <div class="err" id="err">{{ERR}}</div>
-      <div style="height:10px"></div>
+      <div class="err">{{ERR}}</div>
+      <div class="loading" id="loading"><div class="loaderDot"></div><div class="small">Loading dashboard...</div></div>
+      <div style="height:8px"></div>
       <div class="small">Developed by Zihuu • Cyberland</div>
-      <div id="loading" class="loading" style="display:none;margin-top:12px">
-        <div class="loaderDot"></div>
-        <div class="small">Loading dashboard...</div>
-      </div>
     </div>
   </form>
 </div>
-
 <script>
-// animated gradient background + subtle particles (lightweight)
+// animated gradient blobs with mouse parallax
 const canvas = document.getElementById('bg');
 const ctx = canvas.getContext('2d');
 let W = canvas.width = innerWidth, H = canvas.height = innerHeight;
 window.addEventListener('resize', ()=>{ W = canvas.width = innerWidth; H = canvas.height = innerHeight; });
 const blobs = [];
-for (let i=0;i<28;i++){
-  blobs.push({ x: Math.random()*W, y: Math.random()*H, r: 40+Math.random()*220, a: Math.random()*Math.PI*2, s: 0.0006 + Math.random()*0.0015 });
-}
-let mx=-9999,my=-9999;
-document.addEventListener('mousemove', e=>{ mx=e.clientX; my=e.clientY; });
-function drawBg(){
-  ctx.clearRect(0,0,W,H);
-  // gradient base
-  const g = ctx.createLinearGradient(0,0,W,H);
-  g.addColorStop(0, 'rgba(124,58,237,0.06)');
-  g.addColorStop(0.5,'rgba(6,182,212,0.04)');
-  g.addColorStop(1,'rgba(2,6,23,0.96)');
-  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
-  // blobs
-  for (const b of blobs){
-    b.a += b.s;
-    const gx = b.x + Math.cos(b.a) * 60 + ((mx>-9000)? (mx-W/2)/30 : 0);
-    const gy = b.y + Math.sin(b.a) * 60 + ((my>-9000)? (my-H/2)/30 : 0);
-    const rg = ctx.createRadialGradient(gx,gy,b.r*0.05,gx,gy,b.r);
-    rg.addColorStop(0, 'rgba(124,58,237,0.16)');
-    rg.addColorStop(0.5,'rgba(6,182,212,0.12)');
-    rg.addColorStop(1,'rgba(124,58,237,0)');
-    ctx.beginPath(); ctx.fillStyle = rg; ctx.arc(gx,gy,b.r,0,Math.PI*2); ctx.fill();
-  }
-  requestAnimationFrame(drawBg);
-}
-drawBg();
-
-function onLogin(e){
-  // show loading animation until server responds (for UX)
-  const btn = e.target.querySelector('button');
-  const loading = document.getElementById('loading');
-  btn.style.display = 'none';
-  loading.style.display = 'flex';
-}
+for (let i=0;i<28;i++) blobs.push({ x: Math.random()*W, y: Math.random()*H, r: 40+Math.random()*220, a: Math.random()*Math.PI*2, s: 0.0006 + Math.random()*0.0015 });
+let mx=-9999,my=-9999; document.addEventListener('mousemove', e=>{ mx=e.clientX; my=e.clientY; });
+function draw(){ ctx.clearRect(0,0,W,H); const g = ctx.createLinearGradient(0,0,W,H); g.addColorStop(0,'rgba(124,58,237,0.06)'); g.addColorStop(0.5,'rgba(6,182,212,0.04)'); g.addColorStop(1,'rgba(2,6,23,0.96)'); ctx.fillStyle = g; ctx.fillRect(0,0,W,H); for (const b of blobs){ b.a += b.s; const gx = b.x + Math.cos(b.a)*60 + ((mx>-9000)? (mx-W/2)/30 : 0); const gy = b.y + Math.sin(b.a)*60 + ((my>-9000)? (my-H/2)/30 : 0); const rg = ctx.createRadialGradient(gx,gy,b.r*0.05,gx,gy,b.r); rg.addColorStop(0,'rgba(124,58,237,0.16)'); rg.addColorStop(0.5,'rgba(6,182,212,0.12)'); rg.addColorStop(1,'rgba(124,58,237,0)'); ctx.beginPath(); ctx.fillStyle = rg; ctx.arc(gx,gy,b.r,0,Math.PI*2); ctx.fill(); } requestAnimationFrame(draw); }
+draw();
+function onLogin(e){ const btn = e.target.querySelector('button'); const loading = document.getElementById('loading'); btn.style.display = 'none'; loading.style.display = 'flex'; }
 </script>
 </body></html>`;
 
-// --- Dashboard HTML ---
 const dashHTML = (user) => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Cyberland Ultra Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
 <style>
-:root{--accent1:#7c3aed;--accent2:#06b6d4;--glass:rgba(255,255,255,0.03);--muted:rgba(255,255,255,0.04)}
+:root{--a1:#7c3aed;--a2:#06b6d4;--glass:rgba(255,255,255,0.03);--muted:rgba(255,255,255,0.04)}
 *{box-sizing:border-box}
 body{margin:0;font-family:Inter,system-ui;background:linear-gradient(180deg,#020617,#071026);color:#EAF2FF;min-height:100vh}
 .header{display:flex;justify-content:space-between;align-items:center;padding:18px 28px;border-bottom:1px solid rgba(255,255,255,0.02)}
 .brand{font-weight:800}
 .controls{display:flex;gap:12px;align-items:center}
-.badge{padding:8px 12px;border-radius:999px;background:linear-gradient(180deg,transparent,rgba(255,255,255,0.01));border:1px solid var(--muted)}
+.badge{padding:8px 12px;border-radius:999px;background:linear-gradient(180deg,transparent,rgba(255,255,255,.01));border:1px solid var(--muted)}
 .container{max-width:1200px;margin:28px auto;padding:20px}
 .morph{height:6px;width:100%;border-radius:999px;background:linear-gradient(90deg,#7c3aed,#06b6d4,#22c55e,#f59e0b);background-size:300% 100%;animation:morph 8s linear infinite}
 @keyframes morph{0%{background-position:0%}50%{background-position:100%}100%{background-position:0%}}
@@ -400,111 +358,54 @@ body{margin:0;font-family:Inter,system-ui;background:linear-gradient(180deg,#020
 .tab{padding:8px 12px;border-radius:10px;background:rgba(255,255,255,0.02);border:1px solid var(--muted);cursor:pointer}
 .tab.active{background:linear-gradient(135deg,rgba(124,58,237,.16),rgba(6,182,212,.12));transform:translateY(-3px)}
 .input,textarea{width:100%;padding:12px;border-radius:12px;border:none;background:rgba(255,255,255,.03);color:#fff;outline:none}
-.btn{padding:10px 12px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--accent1),var(--accent2));color:#fff;cursor:pointer}
+.btn{padding:10px 12px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--a1),var(--a2));color:#fff;cursor:pointer}
 .btn:hover{transform:translateY(-3px)}
 .small{font-size:13px;opacity:.9}
 .pulse{animation:pulse 1.4s infinite ease-in-out}@keyframes pulse{0%{opacity:.7}50%{opacity:1}100%{opacity:.7}}
 .statGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .stat{padding:12px;border-radius:12px;background:linear-gradient(180deg,rgba(255,255,255,0.01),transparent);border:1px solid var(--muted);display:flex;flex-direction:column;gap:6px}
-.progressWrap{display:flex;align-items:center;gap:12px}
-.progressCircle{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(#7c3aed var(--p,0%), rgba(255,255,255,0.06) 0%)}
 @media(max-width:980px){ .grid{grid-template-columns:1fr} .controls{display:none} }
 </style></head><body>
-<div class="header">
-  <div class="brand">⚡ Cyberland Ultra Dashboard</div>
-  <div class="controls">
-    <div id="autoBadge" class="badge">Auto: …</div>
-    <div id="aiBadge" class="badge">AI: …</div>
-    <div id="updBadge" class="badge">Update: idle</div>
-    <a href="/logout" style="color:#93c5fd">Logout</a>
+<div class="header"><div class="brand">⚡ Cyberland Ultra Dashboard</div><div class="controls"><div id="autoBadge" class="badge">Auto: …</div><div id="aiBadge" class="badge">AI: …</div><div id="updBadge" class="badge">Update: idle</div><a href="/logout" style="color:#93c5fd">Logout</a></div></div>
+<div class="container"><div class="morph"></div><div class="tabrow"><div class="tab active" data-tab="updates">Updates</div><div class="tab" data-tab="server">Server</div><div class="tab" data-tab="about">About</div></div>
+<div class="grid">
+  <div>
+    <div id="tab-updates" class="card">
+      <div class="statGrid"><div class="stat"><div class="small">Bot Status</div><div id="botStatus" style="font-weight:700">–</div></div><div class="stat"><div class="small">AI Status</div><div id="aiStatus" style="font-weight:700">–</div></div><div class="stat"><div class="small">Next Update</div><div id="nextWindows" style="font-weight:700">–</div></div></div>
+      <div style="margin-top:12px;display:flex;gap:12px">
+        <div style="flex:1"><label class="small">Duration (minutes)</label><input id="minutes" class="input" type="number" min="1" placeholder="e.g., 5" /></div>
+        <div style="width:360px"><label class="small">Reason</label><textarea id="reason" class="input" rows="3" placeholder="Optional reason for update"></textarea></div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="startUpdate()">🚀 Start Update</button>
+        <button class="btn" style="background:linear-gradient(135deg,#16a34a,#06b6d4)" onclick="finishUpdate()">✅ Finish</button>
+        <button class="btn" style="background:linear-gradient(135deg,#f59e0b,#f97316)" onclick="toggleAuto()">🔄 Toggle Auto</button>
+        <button class="btn" style="background:linear-gradient(135deg,#06b6d4,#7c3aed)" onclick="toggleAI()">🤖 Toggle AI</button>
+        <button class="btn" style="background:linear-gradient(135deg,#ef4444,#7c3aed)" onclick="refreshAll()">🔁 Refresh</button>
+      </div>
+      <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center"><div>Countdown: <b id="countdown" class="small pulse">—</b></div><div class="small">Developed by <b>Zihuu</b></div></div>
+    </div>
+    <div id="tab-server" class="card" style="margin-top:18px;display:none"><h3>Minecraft Bedrock Status</h3><div id="mcStatus" class="small pulse">Checking…</div><hr/><label class="small">Autorole ID (optional)</label><div style="display:flex;gap:8px;margin-top:8px"><input id="roleId" class="input" placeholder="Role ID" /><button class="btn" onclick="saveAutorole()">Save</button></div></div>
+    <div id="tab-about" class="card" style="margin-top:18px;display:none"><h3>About</h3><p class="small">Ultra-premium dashboard. AI replies only in the configured channel. Developed by <b>Zihuu</b>.</p></div>
+  </div>
+  <div>
+    <div class="card"><h3>Live</h3><div class="small">Bot: <span id="liveBot">Loading...</span></div><div class="small">Last update: <span id="lastUpdate">—</span></div><div style="margin-top:12px"><button class="btn" onclick="startQuick5()">Quick 5m</button></div></div>
+    <div class="card" style="margin-top:18px"><h3>Details</h3><pre id="details" class="small">loading…</pre></div>
   </div>
 </div>
-
-<div class="container">
-  <div class="morph"></div>
-
-  <div class="tabrow">
-    <div class="tab active" data-tab="updates">Updates</div>
-    <div class="tab" data-tab="server">Server</div>
-    <div class="tab" data-tab="about">About</div>
-  </div>
-
-  <div class="grid">
-    <div>
-      <div id="tab-updates" class="card">
-        <div class="statGrid">
-          <div class="stat"><div class="small">Bot Status</div><div id="botStatus" style="font-weight:700">–</div></div>
-          <div class="stat"><div class="small">AI Status</div><div id="aiStatus" style="font-weight:700">–</div></div>
-          <div class="stat"><div class="small">Next Update</div><div id="nextWindows" style="font-weight:700">–</div></div>
-        </div>
-
-        <div style="margin-top:12px;display:flex;gap:12px">
-          <div style="flex:1">
-            <label class="small">Duration (minutes)</label>
-            <input id="minutes" class="input" type="number" min="1" placeholder="e.g., 5" />
-          </div>
-          <div style="width:360px">
-            <label class="small">Reason</label>
-            <textarea id="reason" class="input" rows="3" placeholder="Optional reason for update"></textarea>
-          </div>
-        </div>
-
-        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn" onclick="startUpdate()">🚀 Start Update</button>
-          <button class="btn" style="background:linear-gradient(135deg,#16a34a,#06b6d4)" onclick="finishUpdate()">✅ Finish</button>
-          <button class="btn" style="background:linear-gradient(135deg,#f59e0b,#f97316)" onclick="toggleAuto()">🔄 Toggle Auto</button>
-          <button class="btn" style="background:linear-gradient(135deg,#06b6d4,#7c3aed)" onclick="toggleAI()">🤖 Toggle AI</button>
-          <button class="btn" style="background:linear-gradient(135deg,#ef4444,#7c3aed)" onclick="refreshAll()">🔁 Refresh</button>
-        </div>
-
-        <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center">
-          <div>Countdown: <b id="countdown" class="small pulse">—</b></div>
-          <div class="small">Developed by <b>Zihuu</b></div>
-        </div>
-      </div>
-
-      <div id="tab-server" class="card" style="margin-top:18px;display:none">
-        <h3>Minecraft Bedrock Status</h3>
-        <div id="mcStatus" class="small pulse">Checking…</div>
-        <hr/>
-        <label class="small">Autorole ID (optional)</label>
-        <div style="display:flex;gap:8px;margin-top:8px">
-          <input id="roleId" class="input" placeholder="Role ID" />
-          <button class="btn" onclick="saveAutorole()">Save</button>
-        </div>
-      </div>
-
-      <div id="tab-about" class="card" style="margin-top:18px;display:none">
-        <h3>About</h3>
-        <p class="small">Ultra-premium dashboard. AI replies only in the configured channel. Developed by <b>Zihuu</b>.</p>
-      </div>
-    </div>
-
-    <div>
-      <div class="card">
-        <h3>Live</h3>
-        <div class="small">Bot: <span id="liveBot">Loading...</span></div>
-        <div class="small">Last update: <span id="lastUpdate">—</span></div>
-        <div style="margin-top:12px"><button class="btn" onclick="startQuick5()">Quick 5m</button></div>
-      </div>
-
-      <div class="card" style="margin-top:18px">
-        <h3>Details</h3>
-        <pre id="details" class="small">loading…</pre>
-      </div>
-    </div>
-  </div>
-
-  <div style="margin-top:18px" class="small">Dashboard time: <span id="dsTime"></span></div>
-</div>
-
+<div style="margin-top:18px" class="small">Dashboard time: <span id="dsTime"></span></div></div>
+<script src="/socket.io/socket.io.js"></script>
 <script>
+const socket = io();
+socket.on('connect', ()=>{ console.log('socket connected'); });
+socket.on('serverState', (s)=>{ document.getElementById('botStatus').innerText = s.bot; document.getElementById('aiStatus').innerText = s.ai; document.getElementById('nextWindows').innerText = s.next; document.getElementById('liveBot').innerText = s.bot; });
+socket.on('updateState', (u)=>{ window.__updateState = u; });
 const tabs = [...document.querySelectorAll('.tab')];
 tabs.forEach(t=>t.onclick=()=>{ tabs.forEach(x=>x.classList.remove('active')); t.classList.add('active'); document.getElementById('tab-updates').style.display='none'; document.getElementById('tab-server').style.display='none'; document.getElementById('tab-about').style.display='none'; document.getElementById('tab-'+t.dataset.tab).style.display='block'; });
 
 async function api(path, opts={}){ const r = await fetch(path, opts); return r.json().catch(()=>({})); }
 async function refreshAll(){ badges(); pollStatus(); tick(); loadDetails(); }
-async function badges(){ const s = await api('/api/state'); document.getElementById('autoBadge').innerText='Auto: '+(s.autoUpdate?'ON':'OFF'); document.getElementById('aiBadge').innerText='AI: '+(s.aiEnabled?'ON':'OFF'); document.getElementById('roleId').value = s.autoroleId||''; document.getElementById('aiStatus').innerText = s.aiEnabled ? 'Online' : 'Offline'; document.getElementById('liveBot').innerText = (await api('/api/bot-status')).status; }
+async function badges(){ const s = await api('/api/state'); document.getElementById('autoBadge').innerText='Auto: '+(s.autoUpdate?'ON':'OFF'); document.getElementById('aiBadge').innerText='AI: '+(s.aiEnabled?'ON':'OFF'); document.getElementById('roleId').value = s.autoroleId||''; }
 async function startUpdate(){ const minutes = Number(document.getElementById('minutes').value||0); const reason = document.getElementById('reason').value||''; if(!minutes||minutes<1) return alert('Enter minutes >= 1'); await fetch('/api/start-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({minutes,reason})}); alert('Update started'); }
 async function startQuick5(){ await fetch('/api/start-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({minutes:5,reason:'Quick 5m'})}); alert('Quick 5m started'); }
 async function finishUpdate(){ await fetch('/api/finish-update',{method:'POST'}); alert('Finish requested'); }
@@ -518,73 +419,77 @@ function dsTime(){ document.getElementById('dsTime').innerText = new Date().toLo
 
 badges(); pollStatus(); loadDetails(); tick(); dsTime();
 setInterval(pollStatus,10000); setInterval(tick,1000); setInterval(dsTime,1000);
-</script>
-</body></html>`;
+</script></body></html>`;
 
-// ------------------------- AUTH ROUTES -------------------------
+// ---------- Routes ----------
 function requireAuth(req,res,next){
   if (req.session?.loggedIn) return next();
-  return res.redirect('/login');
+  res.redirect('/login');
 }
-
 app.get('/login', (req,res) => res.send(loginHTML.replace('{{ERR}}','')));
 app.post('/login', (req,res) => {
   const u = (req.body.username||'').toString().trim().toLowerCase();
   const p = (req.body.password||'').toString();
   if (USERS.has(u) && USERS.get(u) === p) {
-    req.session.loggedIn = true;
-    req.session.username = u;
-    return res.redirect('/');
+    req.session.loggedIn = true; req.session.username = u; return res.redirect('/');
   }
   return res.send(loginHTML.replace('{{ERR}}','Invalid credentials.'));
 });
 app.get('/logout', (req,res) => { req.session.destroy(()=>{}); res.redirect('/login'); });
 app.get('/', requireAuth, (req,res) => res.send(dashHTML(req.session.username || 'admin')));
 
-// ------------------------- DASHBOARD APIs -------------------------
+// APIs
 app.get('/api/state', requireAuth, (_req,res) => res.json({ autoUpdate, aiEnabled, autoroleId }));
 app.get('/api/update-state', requireAuth, (_req,res) => res.json(updateState));
-app.post('/api/toggle-auto', requireAuth, (_req,res) => { autoUpdate = !autoUpdate; res.json({ autoUpdate }); });
-app.post('/api/toggle-ai', requireAuth, (_req,res) => { aiEnabled = !aiEnabled; res.json({ aiEnabled }); });
+app.post('/api/toggle-auto', requireAuth, (_req,res) => { autoUpdate = !autoUpdate; io.emit('serverState', makeServerState()); res.json({ autoUpdate }); });
+app.post('/api/toggle-ai', requireAuth, (_req,res) => { aiEnabled = !aiEnabled; io.emit('serverState', makeServerState()); res.json({ aiEnabled }); });
 app.post('/api/autorole', requireAuth, (req,res) => { autoroleId = (req.body.roleId||'').toString().trim() || null; res.json({ success:true, autoroleId }); });
 
-app.get('/api/bot-status', requireAuth, (_req,res) => {
-  const status = client?.user ? `Logged in as ${client.user.tag}` : 'Disconnected';
-  res.json({ status });
-});
+app.get('/api/bot-status', requireAuth, (_req,res) => res.json({ status: client?.user ? `Logged in as ${client.user.tag}` : 'Disconnected' }));
 app.get('/api/details', requireAuth, (_req,res) => res.json({ updateState, aiEnabled, autoUpdate, channelId: CHANNEL_ID || null, openaiConfigured: !!OPENAI_API_KEY, discordConnected: !!client?.user }));
 app.get('/api/server-status', requireAuth, async (_req,res) => {
   try {
     const s = await mcu.statusBedrock(MINECRAFT_IP, MINECRAFT_PORT, { timeout: 4000 });
     res.json({ online:true, players: s.players.online, ping: s.roundTripLatency });
-  } catch (e) {
-    res.json({ online:false });
-  }
+  } catch (e) { res.json({ online:false }); }
 });
 app.get('/api/next-windows', requireAuth, (_req,res) => res.json({ text: nextUpdateWindowsString() }));
 
-// ------------------------- DASHBOARD CONTROL (start/finish) -------------------------
+// start/finish update endpoints
 app.post('/api/start-update', requireAuth, async (req,res) => {
   try {
     const minutes = Math.max(1, Number(req.body.minutes || 1));
     const reason = (req.body.reason || '').toString().slice(0,1000);
     await startUpdateFlow({ minutes, reason, auto:false });
+    io.emit('updateState', updateState);
     res.json({ success:true });
   } catch (e) { console.error('api start-update error:', e?.message || e); res.json({ success:false, error: e?.message || e }); }
 });
-
 app.post('/api/finish-update', requireAuth, async (_req,res) => {
-  try { await finishUpdateFlow({ auto:false }); res.json({ success:true }); }
+  try { await finishUpdateFlow({ auto:false }); io.emit('updateState', updateState); res.json({ success:true }); }
   catch (e) { console.error('api finish-update error:', e?.message || e); res.json({ success:false, error: e?.message || e }); }
 });
 
-// ------------------------- AI MESSAGE HANDLER -------------------------
+// ---------- Socket.io live state emitter ----------
+function makeServerState(){
+  return {
+    bot: client?.user ? `Online (${client.user.tag})` : 'Disconnected',
+    ai: aiEnabled ? 'Available' : 'Disabled',
+    next: nextUpdateWindowsString(),
+  };
+}
+io.on('connection', (socket) => {
+  socket.emit('serverState', makeServerState());
+  socket.emit('updateState', updateState);
+});
+
+// ---------- AI message handler (single channel) ----------
 let aiQueue = Promise.resolve();
 client.on('messageCreate', async (message) => {
   try {
-    if (message.author?.bot) return;
+    if (message.author.bot) return;
     if (!CHANNEL_ID) return;
-    if (message.channel.id !== CHANNEL_ID) return; // strict single channel
+    if (message.channel.id !== CHANNEL_ID) return;
     if (!aiEnabled) return;
 
     await message.channel.sendTyping();
@@ -596,28 +501,29 @@ client.on('messageCreate', async (message) => {
     });
     await aiQueue;
   } catch (e) {
-    console.error('AI handler err:', e?.message || e);
+    console.error('AI handler error:', e?.message || e);
   }
 });
 
-// ------------------------- Autorole -------------------------
+// ---------- autorole ----------
 client.on('guildMemberAdd', async (member) => {
   try {
     if (!autoroleId) return;
     const role = member.guild.roles.cache.get(autoroleId) || await member.guild.roles.fetch(autoroleId).catch(()=>null);
     if (role) await member.roles.add(role).catch(()=>{});
-  } catch (e) { console.error('autorole err:', e?.message || e); }
+  } catch (e) { console.error('autorole error:', e?.message || e); }
 });
 
-// ------------------------- START -------------------------
+// ---------- start discord & server ----------
 client.on('ready', () => {
-  console.log('✅ Discord client ready as', client.user?.tag || 'unknown');
-  if (!CHANNEL_ID) console.warn('⚠️ CHANNEL_ID not set — AI and update features will not work until set.');
+  console.log('✅ Discord ready as', client.user?.tag || 'unknown');
+  io.emit('serverState', makeServerState());
+  if (!CHANNEL_ID) console.warn('⚠️ CHANNEL_ID not set — AI and update features disabled until configured.');
 });
 
-// Login and web server
 client.login(DISCORD_TOKEN).catch(err => {
   console.error('Discord login failed:', err?.message || err);
-  // Keep dashboard up so you can inspect environment variables
+  // keep server running for dashboard to inspect env
 });
-app.listen(PORT, () => console.log(`🌐 Ultra Dashboard running on port ${PORT}`));
+
+server.listen(PORT, () => console.log(`🌐 Ultra Dashboard running on port ${PORT}`));
