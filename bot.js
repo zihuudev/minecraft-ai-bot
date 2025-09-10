@@ -39,8 +39,7 @@ let CHANNEL_ID = process.env.CHANNEL_ID || ''; // can be changed from dashboard
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || '';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-const UPDATE_GIF_URL = process.env.UPDATE_GIF_URL || 'https://imgur.com/a/6XqDixX';
-const FINISH_GIF_URL = process.env.FINISH_GIF_URL || 'https://imgur.com/a/6XqDixX';
+const FINISH_GIF_URL = process.env.FINISH_GIF_URL || 'https://cdn.discordapp.com/attachments/1372904503791321230/1415325589258371153/standard_8.gif?ex=68c2cc2b&is=68c17aab&hm=48b6bdf43ecc7caabc31c70abd47f1e2959ff0b19b36038266475f0327ef8cd0&';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'cyberland_ultra_session_secret';
 
 // Minecraft server
@@ -97,7 +96,7 @@ async function purgeChannel(channel) {
 async function lockChannel(channel, lock) {
   try {
     if (!channel || !channel.guild) return;
-    await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { SendMessages: lock ? false : true });
+    await channel.permissionOverwrites.edit(channel.guild.roles., { SendMessages: lock ? false : true });
   } catch (e) { console.error('lockChannel error:', e?.message || e); }
 }
 
@@ -617,3 +616,4 @@ client.login(DISCORD_TOKEN).catch(err => {
 
 // start web server
 server.listen(PORT, () => console.log(`🌐 Ultra Dashboard running on port ${PORT}`));
+
