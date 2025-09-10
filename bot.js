@@ -96,7 +96,7 @@ async function purgeChannel(channel) {
 async function lockChannel(channel, lock) {
   try {
     if (!channel || !channel.guild) return;
-    await channel.permissionOverwrites.edit(channel.guild.roles., { SendMessages: lock ? false : true });
+    await channel.permissionOverwrites.edit(channel.guild.roles.members, { SendMessages: lock ? false : true });
   } catch (e) { console.error('lockChannel error:', e?.message || e); }
 }
 
