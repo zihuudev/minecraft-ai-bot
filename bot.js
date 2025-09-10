@@ -316,16 +316,16 @@ const loginHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="
 </style></head><body>
 <canvas id="bg" class="canvas"></canvas>
 <div id="loader" class="loaderOverlay" style="display:none"><div class="loaderBox"><div style="font-weight:700;margin-bottom:8px">Loading Dashboard</div><div class="loadingDots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div></div>
-<div class="center"><form class="card" method="POST" action="/login" onsubmit="onLogin(event)"><div class="left"><div class="logo">CYBERLAND</div><div class="h">Ultra Admin Dashboard</div><div class="small">Authorized: <b>zihuu</b>, <b>shahin</b>, <b>mainuddin</b></div><div style="height:12px"></div><div class="small">Secure admin panel • Animated UI</div></div><div class="right"><div style="font-weight:700">🔐 Login</div><input class="input" name="username" placeholder="Username" required /><input class="input" name="password" type="password" placeholder="Password" required /><button class="btn" type="submit">Enter Dashboard</button><div class="err">{{ERR}}</div><div style="height:8px"></div><div class="small">Developed by Zihuu • Cyberland</div></div></form></div>
+<div class="center"><form class="card" method="POST" action="/login" onsubmit="onLogin(event)"><div class="left"><div class="logo">CYBERLAND</div><div class="h">Admin Dashboard</div><div class="small">Authorized For Cyberland Owners <b></b>, <b></b>, <b></b></div><div style="height:12px"></div><div class="small">Secure admin panel</div></div><div class="right"><div style="font-weight:700">🔐 Login</div><input class="input" name="username" placeholder="Username" required /><input class="input" name="password" type="password" placeholder="Password" required /><button class="btn" type="submit">Enter Dashboard</button><div class="err">{{ERR}}</div><div style="height:8px"></div><div class="small">Developed by Zihuu • Cyberland</div></div></form></div>
 <script>
 const canvas = document.getElementById('bg'); const ctx = canvas.getContext('2d'); let W = canvas.width = innerWidth, H = canvas.height = innerHeight; window.addEventListener('resize', ()=>{ W = canvas.width = innerWidth; H = canvas.height = innerHeight; });
 const blobs = []; for (let i=0;i<30;i++) blobs.push({ x: Math.random()*W, y: Math.random()*H, r: 40+Math.random()*220, a: Math.random()*Math.PI*2, s: 0.0006 + Math.random()*0.0016 }); let mx=-9999,my=-9999; document.addEventListener('mousemove', e=>{ mx=e.clientX; my=e.clientY; });
 function drawBg(){ ctx.clearRect(0,0,W,H); const g = ctx.createLinearGradient(0,0,W,H); g.addColorStop(0,'rgba(124,58,237,0.06)'); g.addColorStop(0.5,'rgba(6,182,212,0.04)'); g.addColorStop(1,'rgba(2,6,23,0.96)'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H); for (const b of blobs){ b.a += b.s; const gx = b.x + Math.cos(b.a)*60 + ((mx>-9000)? (mx-W/2)/30 : 0); const gy = b.y + Math.sin(b.a)*60 + ((my>-9000)? (my-H/2)/30 : 0); const rg = ctx.createRadialGradient(gx,gy,b.r*0.05,gx,gy,b.r); rg.addColorStop(0,'rgba(124,58,237,0.16)'); rg.addColorStop(0.5,'rgba(6,182,212,0.12)'); rg.addColorStop(1,'rgba(124,58,237,0)'); ctx.beginPath(); ctx.fillStyle = rg; ctx.arc(gx,gy,b.r,0,Math.PI*2); ctx.fill(); } requestAnimationFrame(drawBg); } drawBg();
-function onLogin(e){ const loader = document.getElementById('loader'); loader.style.display = 'flex'; e.preventDefault(); setTimeout(()=> e.target.submit(), 5000); }
+function onLogin(e){ const loader = document.getElementById('loader'); loader.style.display = 'flex'; e.preventDefault(); setTimeout(()=> e.target.submit(), 2000); }
 </script></body></html>`;
 
 // ---------- Dashboard HTML (ultra premium, controls & send embed/message) ----------
-const dashHTML = (user) => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cyberland Ultra Dashboard</title>
+const dashHTML = (user) => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cyberland Ai</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
 <style>
 :root{--a1:#7c3aed;--a2:#06b6d4;--glass:rgba(255,255,255,0.03);--muted:rgba(255,255,255,0.04)}
@@ -343,7 +343,7 @@ const dashHTML = (user) => `<!doctype html><html><head><meta charset="utf-8"><me
 </style></head><body>
 <canvas id="particleCanvas"></canvas>
 <div id="loadingOverlay" class="loadingOverlay" style="display:none"><div class="loadingBox"><div class="loadingTitle">Loading…</div><div class="loadingSpinner"></div><div style="height:8px"></div><div class="small">Preparing widgets</div></div></div>
-<div class="app"><div class="header"><div class="brand">⚡ Cyberland Ultra Dashboard</div><div class="controls"><div id="autoBadge" class="badge">Auto: …</div><div id="aiBadge" class="badge">AI: …</div><div id="updBadge" class="badge">Update: idle</div><a href="/logout" style="color:#93c5fd">Logout</a></div></div>
+<div class="app"><div class="header"><div class="brand">Cyberland Ai Dashboard</div><div class="controls"><div id="autoBadge" class="badge">Auto: …</div><div id="aiBadge" class="badge">AI: …</div><div id="updBadge" class="badge">Update: idle</div><a href="/logout" style="color:#93c5fd">Logout</a></div></div>
 <div class="container"><div class="morph"></div><div class="tabrow"><div class="tab active" data-tab="updates">Updates</div><div class="tab" data-tab="server">Server</div><div class="tab" data-tab="controls">Controls</div><div class="tab" data-tab="about">About</div></div>
 <div class="grid">
   <div>
@@ -617,3 +617,4 @@ client.login(DISCORD_TOKEN).catch(err => {
 
 // start web server
 server.listen(PORT, () => console.log(`🌐 Ultra Dashboard running on port ${PORT}`));
+
