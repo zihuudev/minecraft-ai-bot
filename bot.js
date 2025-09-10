@@ -177,7 +177,7 @@ function nextUpdateWindowsString() {
   if (now.isBefore(w1s)) return `${w1s.format('h:mm A')} - ${w1e.format('h:mm A')} & ${w2s.format('h:mm A')} - ${w2e.format('h:mm A')} (BDT)`;
   if (now.isBefore(w2s)) return `${w2s.format('h:mm A')} - ${w2e.format('h:mm A')} (today)`;
   const tm = base.clone().add(1, 'day');
-  return `${tm.clone().add(11, 'hours').add(20, 'minutes').format('MMM D h:mm A')} - next windows`;
+  return `${tm.clone().add(11, 'hours').add(20, 'minutes').format('MMM D h:mm A')}`;
 }
 
 function createUpdatingEmbed({ minutes, reason, auto, progress = 0 }) {
@@ -615,3 +615,4 @@ client.login(DISCORD_TOKEN).catch(err => {
 
 // start web server
 server.listen(PORT, () => console.log(`🌐 Ultra Dashboard running on port ${PORT}`));
+
