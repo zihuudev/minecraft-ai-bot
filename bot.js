@@ -223,7 +223,7 @@ async function startUpdateFlow({ minutes, reason = '', auto = false, progressInt
   await purgeChannel(ch);
   await lockChannel(ch, true);
 
-  const initialMsg = await ch.send({ content: '@everyone', embeds: [createUpdatingEmbed({ minutes, reason, auto, progress: 0 })] }).catch(e => { throw e; });
+  const initialMsg = await ch.send({ content: '', embeds: [createUpdatingEmbed({ minutes, reason, auto, progress: 0 })] }).catch(e => { throw e; });
   updateState.messageId = initialMsg.id;
 
   // progress: edit message every progressIntervalMs to show incremental progress
@@ -239,7 +239,7 @@ async function startUpdateFlow({ minutes, reason = '', auto = false, progressInt
       const elapsed = Date.now() - startTs;
       progress = Math.min(100, (elapsed / totalMs) * 100);
       const e = createUpdatingEmbed({ minutes, reason, auto, progress });
-      await initialMsg.edit({ content: '@everyone', embeds: [e] }).catch(() => { /* ignore */ });
+      await initialMsg.edit({ content: '', embeds: [e] }).catch(() => { /* ignore */ });
       // emit update to dashboard
       io.emit('updateState', updateState);
     } catch (err) {
@@ -268,7 +268,7 @@ async function finishUpdateFlow({ auto = false }) {
   await purgeChannel(ch);
   await lockChannel(ch, false);
   const completedAt = fmtTS(Date.now());
-  await ch.send({ content: '@everyone', embeds: [createUpdatedEmbed({ auto, completedAt })] }).catch(() => { /* ignore */ });
+  await ch.send({ content: '', embeds: [createUpdatedEmbed({ auto, completedAt })] }).catch(() => { /* ignore */ });
 
   updateState = { active: false, auto: false, reason: '', startedAt: 0, endsAt: 0, minutes: 0, messageId: null };
   if (updateTimer) { clearTimeout(updateTimer); updateTimer = null; }
@@ -511,7 +511,7 @@ app.post('/api/send', requireAuth, async (req, res) => {
     if (kind === 'embed') {
       const e = ultraEmbed(0x7c3aed, title || 'Announcement', content || '');
       if (gif) e.setImage(gif);
-      await ch.send({ content: '@everyone', embeds: [e] });
+      await ch.send({ content: '', embeds: [e] });
       return res.json({ success: true });
     } else {
       await ch.send({ content: content || '' });
@@ -615,4 +615,5 @@ client.login(DISCORD_TOKEN).catch(err => {
 
 // start web server
 server.listen(PORT, () => console.log(`🌐 Ultra Dashboard running on port ${PORT}`));
+
 
