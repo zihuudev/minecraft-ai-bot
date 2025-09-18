@@ -12,9 +12,9 @@ const { statusBedrock } = require("minecraft-server-util");
 // ========= ENV VARS =========
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const SESSION_SECRET = process.env.SESSION_SECRET || "cblai112211";
+const SESSION_SECRET = process.env.SESSION_SECRET || "supersecret";
 const AI_CHANNEL_ID = process.env.CHANNEL_ID || "1404498262379200522";
-const MINECRAFT_IP = process.env.MC_IP || "play.cyberland.top";
+const MINECRAFT_IP = process.env.MC_IP || "play.cyberland.pro";
 const MINECRAFT_PORT = parseInt(process.env.MC_PORT || "19132"); // Bedrock default
 const PORT = process.env.PORT || 3000;
 
