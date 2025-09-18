@@ -1,5 +1,5 @@
 // ==========================
-// Premium Minecraft AI Bot + Dashboard (All-in-One)
+// Premium Minecraft AI Bot + Dashboard
 // ==========================
 
 require("dotenv").config();
@@ -31,7 +31,11 @@ const USERS = new Map([
 // Discord Bot
 // ==========================
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
 });
 
 client.once("ready", () => {
@@ -62,9 +66,13 @@ client.on("messageCreate", async msg => {
   if (msg.author.bot) return;
   if (msg.channel.id !== CHANNEL_ID) return;
 
-  msg.channel.sendTyping();
-  const reply = await askAI(msg.content);
-  msg.reply({ content: reply });
+  try {
+    msg.channel.sendTyping();
+    const reply = await askAI(msg.content);
+    await msg.reply({ content: reply });
+  } catch (e) {
+    console.error("Reply error:", e.message);
+  }
 });
 
 // ==========================
@@ -77,20 +85,21 @@ const io = new Server(server);
 app.use(express.urlencoded({ extended: true }));
 app.use(session({ secret: SESSION_SECRET, resave: false, saveUninitialized: true }));
 
-// Auth middleware
 function requireLogin(req, res, next) {
   if (!req.session.user) return res.redirect("/login");
   next();
 }
 
-// Login page with loader animation
+// ==========================
+// HTML TEMPLATES
+// ==========================
 const loginHTML = `
 <!DOCTYPE html>
 <html>
 <head>
 <title>Login - Minecraft AI Bot</title>
 <style>
-  body { margin:0; font-family:Poppins, sans-serif; background:#0f172a; color:#fff; display:flex; justify-content:center; align-items:center; height:100vh; overflow:hidden; }
+  body { margin:0; font-family:Poppins,sans-serif; background:#0f172a; color:#fff; display:flex; justify-content:center; align-items:center; height:100vh; overflow:hidden; }
   .box { background:#1e293b; padding:30px; border-radius:20px; text-align:center; box-shadow:0 0 20px rgba(0,0,0,0.5); opacity:0; animation:fadeIn 2s forwards 2s; }
   input { width:100%; padding:12px; margin:10px 0; border:none; border-radius:10px; }
   button { padding:12px; background:#3b82f6; border:none; border-radius:10px; color:#fff; cursor:pointer; width:100%; }
@@ -119,20 +128,6 @@ const loginHTML = `
 </html>
 `;
 
-app.get("/login", (req, res) => res.send(loginHTML.replace("{{ERR}}", "")));
-
-app.post("/login", (req, res) => {
-  const { username, password } = req.body;
-  if (USERS.get(username) === password) {
-    req.session.user = username;
-    return res.redirect("/dashboard");
-  }
-  res.send(loginHTML.replace("{{ERR}}", "❌ Invalid credentials"));
-});
-
-app.get("/logout", (req, res) => req.session.destroy(() => res.redirect("/login")));
-
-// Dashboard
 function dashHTML(user) {
   return `
 <!DOCTYPE html>
@@ -178,6 +173,22 @@ function dashHTML(user) {
 </html>
   `;
 }
+
+// ==========================
+// Routes
+// ==========================
+app.get("/login", (req, res) => res.send(loginHTML.replace("{{ERR}}", "")));
+
+app.post("/login", (req, res) => {
+  const { username, password } = req.body;
+  if (USERS.get(username) === password) {
+    req.session.user = username;
+    return res.redirect("/dashboard");
+  }
+  res.send(loginHTML.replace("{{ERR}}", "❌ Invalid credentials"));
+});
+
+app.get("/logout", (req, res) => req.session.destroy(() => res.redirect("/login")));
 
 app.get("/dashboard", requireLogin, (req, res) => res.send(dashHTML(req.session.user)));
 
@@ -240,7 +251,11 @@ app.post("/update", requireLogin, async (req, res) => {
 app.post("/send", requireLogin, async (req, res) => {
   const { message } = req.body;
   const channel = client.channels.cache.get(CHANNEL_ID);
-  if (channel) await channel.send({ embeds: [new EmbedBuilder().setDescription(message).setColor(0x3b82f6)] });
+  if (channel) {
+    await channel.send({
+      embeds: [new EmbedBuilder().setDescription(message).setColor(0x3b82f6)]
+    });
+  }
   res.redirect("/dashboard");
 });
 
