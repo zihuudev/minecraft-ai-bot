@@ -1,249 +1,123 @@
-// ================================================================
-// Cyberland Ultra-Premium All-in-One bot.js (Fixed Lock/Unlock)
-// ================================================================
+// bot.js
+require("dotenv").config();
+const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField } = require("discord.js");
+const express = require("express");
+const OpenAI = require("openai");
 
-require('dotenv').config();
+// === OpenAI Setup ===
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-const express = require('express');
-const bodyParser = require('body-parser');
-const session = require('express-session');
-const http = require('http');
-const { Server: IOServer } = require('socket.io');
-const axios = require('axios');
-const cron = require('node-cron');
-const moment = require('moment-timezone');
-const mcu = require('minecraft-server-util');
-const {
-  Client,
-  GatewayIntentBits,
-  Partials,
-  EmbedBuilder,
-  PermissionsBitField,
-} = require('discord.js');
-
-const PORT = process.env.PORT || 3000;
-const TZ = 'Asia/Dhaka';
-
-let CHANNEL_ID = process.env.CHANNEL_ID || '';
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN || '';
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-const FINISH_GIF_URL =
-  process.env.FINISH_GIF_URL ||
-  'https://cdn.discordapp.com/attachments/1372904503791321230/1415325589258371153/standard_8.gif';
-const SESSION_SECRET =
-  process.env.SESSION_SECRET || 'cyberland_ultra_session_secret';
-
-// ---------- Discord Client ----------
+// === Discord Setup ===
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
   ],
-  partials: [Partials.Channel, Partials.Message, Partials.GuildMember],
 });
 
-// ---------- Runtime state ----------
-let aiEnabled = true;
-let autoUpdate = true;
-let updateState = {
-  active: false,
-  auto: false,
-  reason: '',
-  startedAt: 0,
-  endsAt: 0,
-  minutes: 0,
-  messageId: null,
-};
-
-// ---------- Helpers ----------
-function nowTs() {
-  return Date.now();
-}
-function fmtTS(ts) {
-  return moment(ts).tz(TZ).format('MMM D, YYYY h:mm A');
-}
-
-// ---------- Purge & Lock ----------
-async function purgeChannel(channel) {
-  try {
-    if (!channel?.isTextBased?.()) return;
-    let fetched;
-    do {
-      fetched = await channel.messages.fetch({ limit: 100 });
-      if (!fetched.size) break;
-      try {
-        await channel.bulkDelete(fetched, true);
-      } catch {
-        for (const [, msg] of fetched) {
-          try {
-            await msg.delete();
-          } catch {}
-        }
-      }
-    } while (fetched.size >= 2);
-  } catch (e) {
-    console.error('purgeChannel error:', e?.message);
-  }
-}
-
-async function lockChannel(channel, lock) {
-  try {
-    if (!channel || !channel.guild) return;
-    const role = channel.guild.roles.everyone;
-
-    await channel.permissionOverwrites.edit(role, {
-      SendMessages: lock ? false : true,
-      AddReactions: lock ? false : true,
-    });
-
-    console.log(`✅ Channel ${lock ? 'locked' : 'unlocked'} successfully.`);
-  } catch (e) {
-    console.error(`lockChannel error: ${e?.message}`);
-  }
-}
-
-// ---------- Embeds ----------
-function ultraEmbed(color, title, description) {
-  return new EmbedBuilder()
-    .setColor(color)
-    .setTitle(title)
-    .setDescription(description)
-    .setFooter({ text: 'Developed by Zihuu • Cyberland' })
-    .setTimestamp();
-}
-
-function createUpdatingEmbed({ minutes, reason, auto, progress = 0 }) {
-  const title = auto
-    ? '⚡ Automatic Update — In Progress'
-    : '🚀 Manual Update — In Progress';
-  const e = ultraEmbed(
-    0xf59e0b,
-    title,
-    `Maintenance running — optimizing systems.\n\nProgress: **${Math.floor(
-      progress
-    )}%**`
-  );
-  e.addFields(
-    { name: '🎉 Status', value: 'Updating…', inline: true },
-    { name: '🔓 Chat', value: 'Locked', inline: true },
-    { name: '⚡ Performance', value: 'Boosting', inline: true }
-  );
-  if (reason) e.addFields({ name: '📝 Reason', value: reason, inline: false });
-  return e;
-}
-
-function createUpdatedEmbed({ auto, completedAt }) {
-  const e = ultraEmbed(
-    0x22c55e,
-    '✅ You can now use the bot!',
-    'Update finished — everything is optimized.'
-  );
-  e.addFields(
-    { name: '🎉 Status', value: 'Completed', inline: true },
-    { name: '🔓 Chat', value: 'Unlocked', inline: true }
-  );
-  if (completedAt)
-    e.addFields({ name: '✅ Completed At', value: completedAt });
-  if (FINISH_GIF_URL) e.setImage(FINISH_GIF_URL);
-  return e;
-}
-
-// ---------- Update Flow ----------
-async function startUpdateFlow({ minutes, reason = '', auto = false }) {
-  if (!CHANNEL_ID) throw new Error('CHANNEL_ID not set.');
-  const ch = await client.channels.fetch(CHANNEL_ID).catch(() => null);
-  if (!ch) throw new Error('Could not fetch channel.');
-
-  updateState = {
-    active: true,
-    auto,
-    reason,
-    startedAt: nowTs(),
-    endsAt: nowTs() + minutes * 60000,
-    minutes,
-    messageId: null,
-  };
-
-  await purgeChannel(ch);
-  await lockChannel(ch, true);
-
-  const msg = await ch.send({
-    embeds: [createUpdatingEmbed({ minutes, reason, auto, progress: 0 })],
-  });
-  updateState.messageId = msg.id;
-
-  setTimeout(async () => {
-    try {
-      await finishUpdateFlow({ auto });
-    } catch (e) {
-      console.error('finish err', e);
-    }
-  }, minutes * 60000);
-}
-
-async function finishUpdateFlow({ auto }) {
-  if (!CHANNEL_ID) return;
-  const ch = await client.channels.fetch(CHANNEL_ID).catch(() => null);
-  if (!ch) return;
-
-  await purgeChannel(ch);
-  await lockChannel(ch, false);
-
-  const completedAt = fmtTS(Date.now());
-  await ch.send({ embeds: [createUpdatedEmbed({ auto, completedAt })] });
-
-  updateState = {
-    active: false,
-    auto: false,
-    reason: '',
-    startedAt: 0,
-    endsAt: 0,
-    minutes: 0,
-    messageId: null,
-  };
-}
-
-// ---------- Cron Auto Updates ----------
-cron.schedule(
-  '20 11 * * *',
-  () => autoUpdate && startUpdateFlow({ minutes: 5, auto: true }),
-  { timezone: TZ }
-);
-cron.schedule(
-  '25 11 * * *',
-  () => autoUpdate && finishUpdateFlow({ auto: true }),
-  { timezone: TZ }
-);
-
-// ---------- Dashboard ----------
+// === Express Dashboard Setup ===
 const app = express();
-const server = http.createServer(app);
-const io = new IOServer(server);
+const PORT = process.env.PORT || 3000;
 
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(
-  session({
-    secret: SESSION_SECRET,
-    resave: false,
-    saveUninitialized: true,
-    cookie: { maxAge: 86400000 },
-  })
-);
+// Store update status
+let isUpdating = false;
+let updateChannelId = null;
 
-const USERS = new Map([
-  ['zihuu', 'cyberlandai90x90x90'],
-  ['shahin', 'cyberlandai90x90x90'],
-  ['mainuddin', 'cyberlandai90x90x90'],
-]);
+// Serve dashboard
+app.get("/", (req, res) => {
+  res.send(`
+    <html>
+      <head><title>Cyberland AI Dashboard</title></head>
+      <body style="font-family:sans-serif; background:#111; color:white; text-align:center; padding:50px;">
+        <h1>⚡ Cyberland AI Dashboard</h1>
+        <p>Status: <b style="color:${isUpdating ? "orange" : "lightgreen"};">${isUpdating ? "Updating..." : "Active"}</b></p>
+        <button onclick="fetch('/start-update').then(()=>location.reload())" style="padding:10px 20px; margin:10px;">Start Update</button>
+        <button onclick="fetch('/stop-update').then(()=>location.reload())" style="padding:10px 20px; margin:10px;">Stop Update</button>
+      </body>
+    </html>
+  `);
+});
 
-// ... keep dashboard/login routes same as before ...
+// Start Update
+app.get("/start-update", async (req, res) => {
+  if (!updateChannelId) return res.send("No update channel set!");
+  const channel = await client.channels.fetch(updateChannelId);
+  if (!channel) return res.send("Channel not found!");
 
-// ---------- Start ----------
-server.listen(PORT, () =>
-  console.log(`Dashboard running http://localhost:${PORT}`)
-);
-client.login(DISCORD_TOKEN);
+  isUpdating = true;
+  await channel.permissionOverwrites.edit(channel.guild.roles.everyone, {
+    SendMessages: false,
+  });
+
+  const embed = new EmbedBuilder()
+    .setTitle("🚧 Bot Updating...")
+    .setDescription("The AI is currently updating, please wait.\n\n🔒 Channel locked.")
+    .setColor("Orange")
+    .setTimestamp();
+
+  await channel.send({ content: "@everyone", embeds: [embed] });
+  res.send("Update started!");
+});
+
+// Stop Update
+app.get("/stop-update", async (req, res) => {
+  if (!updateChannelId) return res.send("No update channel set!");
+  const channel = await client.channels.fetch(updateChannelId);
+  if (!channel) return res.send("Channel not found!");
+
+  isUpdating = false;
+  await channel.permissionOverwrites.edit(channel.guild.roles.everyone, {
+    SendMessages: true,
+  });
+
+  const embed = new EmbedBuilder()
+    .setTitle("✅ Update Completed")
+    .setDescription("Bot has been updated successfully.\n\n🔓 Channel unlocked. You may chat now!")
+    .setColor("Green")
+    .setTimestamp();
+
+  await channel.send({ content: "@everyone", embeds: [embed] });
+  res.send("Update stopped!");
+});
+
+// === AI Chat Handling ===
+client.on("messageCreate", async (message) => {
+  if (message.author.bot) return;
+
+  // Set update channel automatically from first AI message channel
+  if (!updateChannelId) updateChannelId = message.channel.id;
+
+  if (isUpdating) {
+    return message.reply("⏳ Bot is updating, please wait...");
+  }
+
+  if (message.mentions.has(client.user)) {
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini", // ⚡ Best balance model
+        messages: [
+          { role: "system", content: "You are a Minecraft expert AI specialized in the server play.cyberland.pro. Always give helpful, professional answers about Minecraft, servers, plugins, mods, and gameplay." },
+          { role: "user", content: message.content },
+        ],
+      });
+
+      const reply = response.choices[0].message.content;
+      message.reply(reply);
+    } catch (err) {
+      console.error("OpenAI Error:", err);
+      message.reply("⚠️ Error while contacting AI.");
+    }
+  }
+});
+
+// === Bot Ready ===
+client.once("ready", () => {
+  console.log(`✅ Discord bot logged in as ${client.user.tag}`);
+  app.listen(PORT, () => console.log(`🌍 Dashboard running at http://localhost:${PORT}`));
+});
+
+// === Login ===
+client.login(process.env.DISCORD_TOKEN);
