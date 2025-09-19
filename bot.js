@@ -1,209 +1,106 @@
-// ==========================
-// Premium Minecraft AI Bot + Dashboard (Railway Ready)
-// ==========================
+// ================================
+// Cyberland Ultra Discord AI Bot
+// ================================
 
 require("dotenv").config();
+const {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  PermissionsBitField,
+} = require("discord.js");
 const express = require("express");
+const session = require("express-session");
+const bodyParser = require("body-parser");
 const http = require("http");
 const { Server } = require("socket.io");
-const session = require("express-session");
-const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
+const axios = require("axios");
+const cron = require("node-cron");
+const moment = require("moment-timezone");
 const { statusBedrock } = require("minecraft-server-util");
-const OpenAI = require("openai");
 
-// ==========================
-// Config
-// ==========================
+// ================================
+// ENV
+// ================================
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const OPENAI_KEY = process.env.OPENAI_API_KEY;
-const CHANNEL_ID = process.env.CHANNEL_ID || "1404498262379200522";
-const SESSION_SECRET = process.env.SESSION_SECRET || "supersecret";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const CHANNEL_ID = process.env.CHANNEL_ID;
 const PORT = process.env.PORT || 3000;
+const SESSION_SECRET = process.env.SESSION_SECRET || "supersecret";
 
-const MINECRAFT_IP = "play.cyberland.pro";
-const MINECRAFT_PORT = 19132;
-
-const USERS = new Map([
-  ["zihuu", "zihuu123"],
-  ["shahin", "shahin123"],
-  ["mainuddin", "main123"]
-]);
-
-// ==========================
-// Discord Bot
-// ==========================
+// ================================
+// Discord Client
+// ================================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-  ]
+    GatewayIntentBits.MessageContent,
+  ],
 });
 
-client.once("ready", () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
-});
-
-// OpenAI
-const openai = new OpenAI({ apiKey: OPENAI_KEY });
-
+// ================================
+// AI Chat
+// ================================
 async function askAI(prompt) {
   try {
-    const res = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: "You are a Minecraft expert AI for CyberLand server." },
-        { role: "user", content: prompt }
-      ]
-    });
-    return res.choices[0].message.content;
+    const res = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are Cyberland AI — an expert Minecraft assistant. Always helpful, premium, and knowledgeable about play.cyberland.pro.",
+          },
+          { role: "user", content: prompt },
+        ],
+        max_tokens: 300,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+        },
+      }
+    );
+
+    return res.data.choices[0].message.content.trim();
   } catch (err) {
-    console.error("AI Error:", err.message);
-    return "⚠️ AI service unavailable.";
+    console.error("❌ OpenAI Error:", err.response?.data || err.message);
+    return "⚠️ Sorry, AI service error.";
   }
 }
 
-client.on("messageCreate", async msg => {
-  if (msg.author.bot) return;
-  if (msg.channel.id !== CHANNEL_ID) return;
-
+// ================================
+// Minecraft Server Checker
+// ================================
+async function checkServer() {
   try {
-    msg.channel.sendTyping();
-    const reply = await askAI(msg.content);
-    await msg.reply({ content: reply });
-  } catch (e) {
-    console.error("Reply error:", e.message);
+    const res = await statusBedrock("play.cyberland.pro", 19132, {
+      timeout: 5000,
+    });
+    return `✅ Online — ${res.players.online}/${res.players.max} players`;
+  } catch {
+    return "❌ Offline";
   }
-});
-
-// ==========================
-// Express Dashboard
-// ==========================
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
-
-app.use(express.urlencoded({ extended: true }));
-app.use(session({ secret: SESSION_SECRET, resave: false, saveUninitialized: true }));
-
-function requireLogin(req, res, next) {
-  if (!req.session.user) return res.redirect("/login");
-  next();
 }
 
-// ==========================
-// HTML TEMPLATES
-// ==========================
-const loginHTML = `
-<!DOCTYPE html>
-<html>
-<head>
-<title>Login - Minecraft AI Bot</title>
-<style>
-  body { margin:0; font-family:Poppins,sans-serif; background:#0f172a; color:#fff; display:flex; justify-content:center; align-items:center; height:100vh; overflow:hidden; }
-  .box { background:#1e293b; padding:30px; border-radius:20px; text-align:center; box-shadow:0 0 20px rgba(0,0,0,0.5); opacity:0; animation:fadeIn 2s forwards 2s; }
-  input { width:100%; padding:12px; margin:10px 0; border:none; border-radius:10px; }
-  button { padding:12px; background:#3b82f6; border:none; border-radius:10px; color:#fff; cursor:pointer; width:100%; }
-  .err { color:#f87171; margin-top:10px; }
-  .loader { position:absolute; top:0; left:0; right:0; bottom:0; background:#0f172a; display:flex; justify-content:center; align-items:center; z-index:10; animation:fadeOut 1s forwards 4s; }
-  .dot { width:15px; height:15px; margin:0 5px; background:#3b82f6; border-radius:50%; animation:bounce 1s infinite alternate; }
-  .dot:nth-child(2){animation-delay:0.3s;}
-  .dot:nth-child(3){animation-delay:0.6s;}
-  @keyframes bounce { to{ transform:translateY(-15px);} }
-  @keyframes fadeOut { to{ opacity:0; visibility:hidden;} }
-  @keyframes fadeIn { to{ opacity:1;} }
-</style>
-</head>
-<body>
-<div class="loader"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
-<div class="box">
-  <h2>🔐 Dashboard Login</h2>
-  <form method="post" action="/login">
-    <input type="text" name="username" placeholder="Username" required><br>
-    <input type="password" name="password" placeholder="Password" required><br>
-    <button type="submit">Login</button>
-    <div class="err">{{ERR}}</div>
-  </form>
-</div>
-</body>
-</html>
-`;
+// ================================
+// Update Manager
+// ================================
+let updateState = { active: false, percent: 0 };
 
-function dashHTML(user) {
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-<title>Dashboard</title>
-<style>
-  body { margin:0; font-family:Poppins,sans-serif; background:#0f172a; color:#fff; }
-  nav { background:#1e293b; padding:15px; display:flex; justify-content:space-between; }
-  nav a { color:#fff; margin:0 10px; text-decoration:none; }
-  .content { padding:20px; }
-  button { padding:10px; margin:5px; border:none; border-radius:8px; background:#3b82f6; color:#fff; cursor:pointer; }
-  .card { background:#1e293b; padding:20px; border-radius:15px; margin:10px 0; }
-</style>
-<script src="/socket.io/socket.io.js"></script>
-<script>
-  const socket = io();
-  socket.on("updateState", state => {
-    document.getElementById("updatestatus").innerText = state.inProgress ? "⏳ Updating..." : "✅ Idle";
-  });
-</script>
-</head>
-<body>
-<nav>
-  <div>⚡ Minecraft AI Dashboard</div>
-  <div>Welcome, ${user} | <a href="/logout">Logout</a></div>
-</nav>
-<div class="content">
-  <div class="card">
-    <h3>Update Control</h3>
-    <div>Status: <span id="updatestatus">✅ Idle</span></div>
-    <form action="/update" method="post"><button type="submit">Start Update</button></form>
-  </div>
-  <div class="card">
-    <h3>Server Control</h3>
-    <form action="/send" method="post">
-      <input type="text" name="message" placeholder="Message to Discord" required>
-      <button type="submit">Send</button>
-    </form>
-  </div>
-</div>
-</body>
-</html>
-  `;
-}
-
-// ==========================
-// Routes
-// ==========================
-app.get("/login", (req, res) => res.send(loginHTML.replace("{{ERR}}", "")));
-
-app.post("/login", (req, res) => {
-  const { username, password } = req.body;
-  if (USERS.get(username) === password) {
-    req.session.user = username;
-    return res.redirect("/dashboard");
-  }
-  res.send(loginHTML.replace("{{ERR}}", "❌ Invalid credentials"));
-});
-
-app.get("/logout", (req, res) => req.session.destroy(() => res.redirect("/login")));
-
-app.get("/dashboard", requireLogin, (req, res) => res.send(dashHTML(req.session.user)));
-
-// ==========================
-// Update System
-// ==========================
-let updateState = { inProgress: false };
-
-async function lockChannel(channel, lock) {
+async function lockChannel(lock) {
+  const channel = await client.channels.fetch(CHANNEL_ID);
   const everyone = channel.guild.roles.everyone;
-  await channel.permissionOverwrites.edit(everyone, { SendMessages: !lock });
+  await channel.permissionOverwrites.edit(everyone, {
+    SendMessages: lock ? false : true,
+  });
 }
 
-async function purgeChannel(channel) {
+async function purgeChannel() {
+  const channel = await client.channels.fetch(CHANNEL_ID);
   let fetched;
   do {
     fetched = await channel.messages.fetch({ limit: 100 });
@@ -212,68 +109,175 @@ async function purgeChannel(channel) {
   } while (fetched.size >= 2);
 }
 
-app.post("/update", requireLogin, async (req, res) => {
-  const channel = client.channels.cache.get(CHANNEL_ID);
-  if (!channel) return res.send("❌ Channel not found.");
+async function sendEmbed(title, desc, color = 0x2b2d31) {
+  const channel = await client.channels.fetch(CHANNEL_ID);
+  const embed = new EmbedBuilder()
+    .setTitle(title)
+    .setDescription(desc)
+    .setColor(color)
+    .setTimestamp();
+  await channel.send({ embeds: [embed] });
+}
 
-  updateState.inProgress = true;
+async function runUpdate(io) {
+  updateState.active = true;
+  updateState.percent = 0;
   io.emit("updateState", updateState);
 
-  await purgeChannel(channel);
-  await lockChannel(channel, true);
+  await purgeChannel();
+  await lockChannel(true);
+  await sendEmbed("🚧 Update Started", "Bot is updating, please wait...", 0xffa500);
 
-  const embed = new EmbedBuilder()
-    .setTitle("⏳ Bot Updating...")
-    .setDescription("The bot is under maintenance. Please wait...")
-    .setColor(0xfbbf24);
-
-  await channel.send({ embeds: [embed] });
-
-  // Simulate update
-  setTimeout(async () => {
-    await lockChannel(channel, false);
-    updateState.inProgress = false;
+  const interval = setInterval(async () => {
+    if (updateState.percent >= 100) {
+      clearInterval(interval);
+      updateState.active = false;
+      updateState.percent = 100;
+      await sendEmbed("✅ Update Complete", "You can now chat again!", 0x00ff00);
+      await lockChannel(false);
+      io.emit("updateState", updateState);
+      return;
+    }
+    updateState.percent += 20;
     io.emit("updateState", updateState);
+  }, 3000);
+}
 
-    const done = new EmbedBuilder()
-      .setTitle("✅ Update Complete")
-      .setDescription("Bot update finished. You can chat now!")
-      .setColor(0x22c55e);
+// ================================
+// Express + Dashboard
+// ================================
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
 
-    await channel.send({ embeds: [done] });
-  }, 10000);
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(
+  session({
+    secret: SESSION_SECRET,
+    resave: false,
+    saveUninitialized: true,
+  })
+);
 
-  res.redirect("/dashboard");
+// Demo users
+const USERS = new Map([
+  ["zihuu", "cyberlandai90x90x90"],
+  ["shahin", "cyberlandai90x90x90"],
+  ["mainuddin", "cyberlandai90x90x90"],
+]);
+
+// Middleware
+function requireLogin(req, res, next) {
+  if (!req.session.user) return res.redirect("/login");
+  next();
+}
+
+// Login
+app.get("/login", (req, res) => {
+  res.send(`
+  <html><head><title>Login</title></head>
+  <body style="font-family:sans-serif;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;">
+    <form method="post" style="background:#222;padding:20px;border-radius:10px;">
+      <h2>Cyberland Dashboard</h2>
+      <input name="username" placeholder="Username" required /><br/><br/>
+      <input name="password" type="password" placeholder="Password" required /><br/><br/>
+      <button type="submit">Login</button>
+    </form>
+  </body></html>
+  `);
 });
 
-// ==========================
-// Send Message to Discord
-// ==========================
-app.post("/send", requireLogin, async (req, res) => {
-  const { message } = req.body;
-  const channel = client.channels.cache.get(CHANNEL_ID);
-  if (channel) {
-    await channel.send({
-      embeds: [new EmbedBuilder().setDescription(message).setColor(0x3b82f6)]
-    });
+app.post("/login", (req, res) => {
+  const { username, password } = req.body;
+  if (USERS.get(username) === password) {
+    req.session.user = username;
+    return res.redirect("/dashboard");
   }
-  res.redirect("/dashboard");
+  res.send("❌ Invalid credentials <a href='/login'>Try again</a>");
 });
 
-// ==========================
-// Minecraft Status API
-// ==========================
-app.get("/serverstatus", async (req, res) => {
-  try {
-    const status = await statusBedrock(MINECRAFT_IP, MINECRAFT_PORT);
-    res.json({ online: true, players: status.players.online, max: status.players.max });
-  } catch {
-    res.json({ online: false });
-  }
+// Dashboard
+app.get("/dashboard", requireLogin, (req, res) => {
+  res.send(`
+  <html>
+  <head>
+    <title>Dashboard</title>
+    <script src="/socket.io/socket.io.js"></script>
+  </head>
+  <body style="background:#111;color:#fff;font-family:sans-serif;">
+    <h1>Welcome, ${req.session.user}</h1>
+    <div id="status">Status: ...</div>
+    <button onclick="fetch('/update').then(()=>alert('Update started'))">Start Update</button>
+    <button onclick="fetch('/send?msg=Hello+from+dashboard')">Send Test Message</button>
+    <script>
+      const socket = io();
+      socket.on('updateState', s => {
+        document.getElementById('status').innerText = s.active 
+          ? "Updating... " + s.percent + "%" 
+          : "Idle";
+      });
+    </script>
+  </body>
+  </html>
+  `);
 });
 
-// ==========================
-// Start Servers
-// ==========================
-client.login(DISCORD_TOKEN);
-server.listen(PORT, () => console.log(`🌐 Dashboard running on port ${PORT}`));
+// Update trigger
+app.get("/update", requireLogin, (req, res) => {
+  runUpdate(io);
+  res.send("Update started!");
+});
+
+// Send message
+app.get("/send", requireLogin, async (req, res) => {
+  const channel = await client.channels.fetch(CHANNEL_ID);
+  await channel.send(req.query.msg || "Hello");
+  res.send("Message sent.");
+});
+
+// Logout
+app.get("/logout", (req, res) => {
+  req.session.destroy(() => res.redirect("/login"));
+});
+
+// Socket.io
+io.on("connection", (socket) => {
+  console.log("🌐 Dashboard connected");
+  socket.emit("updateState", updateState);
+});
+
+// ================================
+// Discord Events
+// ================================
+client.once("ready", () => {
+  console.log(`🤖 Logged in as ${client.user.tag}`);
+});
+
+// AI channel
+client.on("messageCreate", async (msg) => {
+  if (msg.author.bot) return;
+  if (msg.channel.id !== CHANNEL_ID) return;
+
+  await msg.channel.sendTyping();
+  const reply = await askAI(msg.content);
+  await msg.reply(reply);
+});
+
+// ================================
+// CRON: Daily server status
+// ================================
+cron.schedule("0 * * * *", async () => {
+  const status = await checkServer();
+  await sendEmbed("🟢 Server Status", status, 0x0099ff);
+});
+
+// ================================
+// Start servers
+// ================================
+server.listen(PORT, () => {
+  console.log(`🚀 Dashboard running on http://localhost:${PORT}`);
+});
+
+client.login(DISCORD_TOKEN).catch((err) =>
+  console.error("❌ Discord Login Failed:", err)
+);
