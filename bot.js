@@ -1,23 +1,28 @@
-// ==================================================================
-// Cyberland Ultra-Premium Bot.js (Full Fixed + Dashboard + AI)
-// Railway Ready
-// ==================================================================
+// ================================================================
+// Cyberland Ultra-Premium Bot + Dashboard
+// Features:
+// - Dashboard login (3 users, 1 password)
+// - AI auto-reply (no prefix)
+// - Channel lock/unlock + clear messages
+// - Premium embed updates
+// - Railway-ready
+// ================================================================
 
 require("dotenv").config();
-const {
-  Client,
-  GatewayIntentBits,
-  EmbedBuilder,
-  PermissionsBitField,
-} = require("discord.js");
+const fs = require("fs");
+const path = require("path");
 const express = require("express");
 const bodyParser = require("body-parser");
 const session = require("express-session");
 const http = require("http");
 const { Server } = require("socket.io");
 const axios = require("axios");
-const fs = require("fs");
-const path = require("path");
+const {
+  Client,
+  GatewayIntentBits,
+  Partials,
+  EmbedBuilder,
+} = require("discord.js");
 
 // ---------------- CONFIG ----------------
 const ADMINS = ["zihuu", "shahin", "mainuddin"];
@@ -45,6 +50,7 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
   ],
+  partials: [Partials.Channel, Partials.Message, Partials.GuildMember],
 });
 
 // ---------------- EXPRESS + DASHBOARD ----------------
@@ -62,22 +68,25 @@ app.use(
   })
 );
 
-// Login routes
+// ---------------- LOGIN & DASHBOARD ----------------
 app.get("/", (req, res) => {
   if (!req.session.user) return res.redirect("/login");
   res.sendFile(path.join(__dirname, "dashboard.html"));
 });
-app.get("/login", (req, res) =>
-  res.sendFile(path.join(__dirname, "login.html"))
-);
+
+app.get("/login", (req, res) => {
+  res.sendFile(path.join(__dirname, "login.html"));
+});
+
 app.post("/login", (req, res) => {
   const { username, password } = req.body;
-  if (ADMINS.includes(username) && password === ADMIN_PASSWORD) {
+  if (ADMINS.includes(username.toLowerCase()) && password === ADMIN_PASSWORD) {
     req.session.user = username;
     return res.redirect("/");
   }
-  res.send("Invalid login <a href='/login'>Try again</a>");
+  res.send("❌ Invalid login. <a href='/login'>Try again</a>");
 });
+
 app.get("/logout", (req, res) => {
   req.session.destroy(() => res.redirect("/login"));
 });
@@ -91,16 +100,13 @@ io.on("connection", (socket) => {
   socket.on("setChannel", (id) => {
     settings.channelId = id;
     saveSettings();
-    socket.emit("msg", "Channel set to " + id);
+    socket.emit("msg", "Channel set to: " + id);
   });
 
   socket.on("toggleAI", () => {
     settings.aiEnabled = !settings.aiEnabled;
     saveSettings();
-    socket.emit(
-      "msg",
-      "AI is now " + (settings.aiEnabled ? "✅ Enabled" : "❌ Disabled")
-    );
+    socket.emit("msg", "AI is now: " + (settings.aiEnabled ? "✅ Enabled" : "❌ Disabled"));
   });
 
   socket.on("startUpdate", async () => {
@@ -111,15 +117,13 @@ io.on("connection", (socket) => {
       const ch = await client.channels.fetch(settings.channelId);
 
       // Lock channel
-      await ch.permissionOverwrites.edit(ch.guild.roles.everyone, {
-        SendMessages: false,
-      });
+      await ch.permissionOverwrites.edit(ch.guild.roles.everyone, { SendMessages: false });
 
       // Clear messages
       const msgs = await ch.messages.fetch({ limit: 50 });
       await ch.bulkDelete(msgs, true);
 
-      // Send premium embed
+      // Send embed
       const embed = new EmbedBuilder()
         .setTitle("🚀 Cyberland Bot Update Running...")
         .setDescription("All messages cleared. Bot is updating...")
@@ -142,9 +146,7 @@ io.on("connection", (socket) => {
       const ch = await client.channels.fetch(settings.channelId);
 
       // Unlock channel
-      await ch.permissionOverwrites.edit(ch.guild.roles.everyone, {
-        SendMessages: true,
-      });
+      await ch.permissionOverwrites.edit(ch.guild.roles.everyone, { SendMessages: true });
 
       const embed = new EmbedBuilder()
         .setTitle("✅ Cyberland Bot Update Finished")
@@ -165,27 +167,34 @@ client.once("ready", () => {
   console.log(`🤖 Logged in as ${client.user.tag}`);
 });
 
+// ---------------- AI AUTO-REPLY ----------------
 client.on("messageCreate", async (msg) => {
   if (msg.author.bot) return;
   if (!settings.aiEnabled) return;
 
-  // Simple AI response (OpenAI optional)
-  if (process.env.OPENAI_API_KEY && msg.content.startsWith("!ask ")) {
-    try {
-      const q = msg.content.slice(5);
+  if (!settings.channelId || msg.channel.id !== settings.channelId) return;
+
+  try {
+    // OpenAI Auto-reply if key present
+    if (process.env.OPENAI_API_KEY) {
       const res = await axios.post(
         "https://api.openai.com/v1/chat/completions",
         {
           model: "gpt-3.5-turbo",
-          messages: [{ role: "user", content: q }],
+          messages: [{ role: "user", content: msg.content }],
+          max_tokens: 300,
+          temperature: 0.7,
         },
         { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
       );
       const answer = res.data.choices[0].message.content;
       msg.reply(answer);
-    } catch (err) {
-      msg.reply("⚠️ AI error");
+    } else {
+      // Fallback simple echo AI
+      msg.reply(`💬 You said: ${msg.content}`);
     }
+  } catch (err) {
+    msg.reply("⚠️ AI error or unavailable");
   }
 });
 
@@ -241,7 +250,7 @@ function saveSettings() {
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 }
 
-// ---------------- START ----------------
+// ---------------- START SERVER ----------------
 server.listen(PORT, () =>
   console.log(`🌐 Dashboard running on http://localhost:${PORT}`)
 );
