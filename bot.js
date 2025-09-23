@@ -69,6 +69,8 @@ app.get("/dashboard", (req, res) => {
     <button onclick="announce()">📢 Announcement</button>
     <button onclick="clearChannel()">🧹 Clear Channel</button>
     <button onclick="botInfo()">📊 Bot Info</button>
+    <button onclick="update()">🔄 Update</button>
+    <button onclick="finish()">🏁 Finish</button>
     <div id="log" style="margin-top:20px;background:#000;padding:10px;height:250px;overflow:auto;border-radius:10px;"></div>
     <script src="/socket.io/socket.io.js"></script>
     <script>
@@ -83,6 +85,7 @@ app.get("/dashboard", (req, res) => {
       function clearChannel(){s.emit("clearChannel");}
       function botInfo(){s.emit("botInfo");}
       function update(){s.emit("update");}
+      function finish(){s.emit("finish");}
     </script>
   </body></html>
   `);
@@ -131,6 +134,40 @@ io.on("connection", (socket) => {
   socket.on("botInfo", () => {
     socket.emit("msg", `Bot Ping: ${client.ws.ping}ms`);
   });
+
+  // 🔄 Update
+  socket.on("update", async () => {
+    const channel = await client.channels.fetch(FIXED_CHANNEL_ID);
+    if (!channel) return;
+    const startEmbed = new EmbedBuilder()
+      .setTitle("🔄 Update Started")
+      .setDescription("Bot update is in progress...")
+      .setColor("Blue").setTimestamp();
+    channel.send({ embeds: [startEmbed] });
+
+    setTimeout(() => {
+      const finishEmbed = new EmbedBuilder()
+        .setTitle("✅ Update Finished")
+        .setDescription("Bot update completed successfully.")
+        .setColor("Green").setTimestamp();
+      channel.send({ embeds: [finishEmbed] });
+    }, 3000);
+
+    socket.emit("msg","🔄 Update sequence executed.");
+  });
+
+  // 🏁 Finish
+  socket.on("finish", async () => {
+    const channel = await client.channels.fetch(FIXED_CHANNEL_ID);
+    if (!channel) return;
+    const embed = new EmbedBuilder()
+      .setTitle("🏁 Bot Finished")
+      .setDescription("Bot is shutting down now.")
+      .setColor("Red").setTimestamp();
+    channel.send({ embeds: [embed] });
+    socket.emit("msg","❌ Bot shutting down.");
+    setTimeout(()=> process.exit(0),2000); // stop bot after 2s
+  });
 });
 
 // ========= DISCORD EVENTS =========
@@ -176,5 +213,3 @@ client.on("messageCreate", async (msg) => {
 // ========= START =========
 client.login(TOKEN);
 server.listen(3000, ()=>console.log("🌐 Dashboard running on port 3000"));
-
-
