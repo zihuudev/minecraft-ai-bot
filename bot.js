@@ -12,8 +12,8 @@ const OpenAI = require("openai");
 // ========= ENV VARIABLES =========
 const TOKEN = process.env.TOKEN;
 const OPENAI_KEY = process.env.OPENAI_KEY;
-const ADMINS = process.env.ADMINS ? process.env.ADMINS.split(",") : [];
-const ADMIN_PASS = process.env.ADMIN_PASS;
+const ADMINS = ["zihuu", "shahin", "mainuddin"]; 
+const ADMIN_PASS = "cyberlandai90x90x90"; // password ekhanei thakbe
 const FIXED_CHANNEL_ID = "1419702204171813015";
 
 // ========= DISCORD CLIENT =========
@@ -175,3 +175,4 @@ client.on("messageCreate", async (msg) => {
 // ========= START =========
 client.login(TOKEN);
 server.listen(3000, ()=>console.log("🌐 Dashboard running on port 3000"));
+
