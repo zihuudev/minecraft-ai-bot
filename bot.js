@@ -38,71 +38,169 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: "cyberland_secret", resave: false, saveUninitialized: true }));
 
 // login
+// LOGIN PAGE
 app.get("/", (req, res) => {
   if (req.session.user) return res.redirect("/dashboard");
   res.send(`
   <html>
-    <head><title>Cyberland Login</title></head>
-    <body style="background:#0f0f0f;color:#fff;text-align:center;padding:50px;font-family:sans-serif;">
-      <h1>🔐 Cyberland Bot Login</h1>
+  <head>
+    <title>Cyberland Login</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: 'Poppins', sans-serif;
+        background: linear-gradient(135deg,#1f1c2c,#928dab);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        color: #fff;
+      }
+      .login-container {
+        background: rgba(0,0,0,0.85);
+        padding: 40px;
+        border-radius: 20px;
+        box-shadow: 0 0 30px rgba(0,0,0,0.5);
+        text-align: center;
+        width: 350px;
+        animation: fadeIn 1s ease-in-out;
+      }
+      h1 { margin-bottom: 30px; color:#ff2a68; }
+      input {
+        width: 80%;
+        padding: 12px;
+        margin: 10px 0;
+        border-radius: 10px;
+        border: none;
+        outline: none;
+      }
+      button {
+        width: 85%;
+        padding: 12px;
+        border: none;
+        border-radius: 10px;
+        background: #ff2a68;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+      button:hover { background: #ff497f; }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-20px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="login-container">
+      <h1>🔐 Cyberland Login</h1>
       <form method="POST" action="/login">
-        <input style="padding:10px;margin:5px;border-radius:8px;" name="username" placeholder="Username" required><br>
-        <input type="password" style="padding:10px;margin:5px;border-radius:8px;" name="password" placeholder="Password" required><br>
-        <button style="padding:10px 20px;border:none;border-radius:8px;background:purple;color:#fff;font-weight:bold;">Login</button>
+        <input name="username" placeholder="Username" required><br>
+        <input type="password" name="password" placeholder="Password" required><br>
+        <button>Login</button>
       </form>
-    </body>
+    </div>
+  </body>
   </html>
   `);
 });
 
-// login post
-app.post("/login", (req, res) => {
-  const { username, password } = req.body;
-  if (ADMINS.includes(username) && password === ADMIN_PASS) {
-    req.session.user = username;
-    res.redirect("/dashboard");
-  } else {
-    res.send("<h2 style='color:red'>Invalid login!</h2><a href='/'>Back</a>");
-  }
-});
-
-// dashboard
+// DASHBOARD PAGE
 app.get("/dashboard", (req, res) => {
   if (!req.session.user) return res.redirect("/");
   res.send(`
   <html>
-    <head><title>Cyberland Dashboard</title></head>
-    <body style="background:#111;color:#fff;font-family:sans-serif;padding:30px;">
-      <h1>⚡ Cyberland Dashboard ⚡</h1>
-      <div style="margin-bottom:10px;">
-        <button onclick="toggleAI()">🤖 Toggle AI</button>
-        <button onclick="announce()">📢 Announcement</button>
-        <button onclick="clearChannel()">🧹 Clear Channel</button>
-        <button onclick="startUpdate()">⏳ Start Update</button>
-        <button onclick="finishUpdate()">✅ Finish Update</button>
-        <button onclick="botInfo()">📊 Bot Info</button>
-      </div>
-      <div id="log" style="margin-top:20px;background:#000;padding:10px;height:300px;overflow:auto;border-radius:10px;"></div>
-      <script src="/socket.io/socket.io.js"></script>
-      <script>
-        const s = io();
-        s.on('msg', m => {
-          const l = document.getElementById('log');
-          l.innerHTML += '<div>' + new Date().toLocaleTimeString() + ' - ' + m + '</div>';
-          l.scrollTop = l.scrollHeight;
-        });
-
-        function toggleAI(){s.emit('toggleAI');}
-        function announce(){const t=prompt("Title?"); const c=prompt("Content?"); const r=prompt("Reason?"); s.emit("announce",{title:t,content:c,reason:r});}
-        function clearChannel(){s.emit("clearChannel");}
-        function startUpdate(){const r=prompt("Reason?"); const m=prompt("Minutes?","5"); s.emit("startUpdate",{reason:r,minutes:Number(m)});}
-        function finishUpdate(){s.emit("finishUpdate");}
-        function botInfo(){s.emit("botInfo");}
-      </script>
-    </body>
+  <head>
+    <title>Cyberland Dashboard</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
+      body {
+        margin: 0;
+        font-family: 'Poppins', sans-serif;
+        background: linear-gradient(135deg,#0f0c29,#302b63,#24243e);
+        color: #fff;
+      }
+      header {
+        background: rgba(0,0,0,0.7);
+        padding: 20px;
+        text-align: center;
+        font-size: 24px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        color: #ff2a68;
+        box-shadow: 0 2px 15px rgba(0,0,0,0.5);
+      }
+      .btn-container {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        margin: 20px 0;
+        gap: 15px;
+      }
+      button {
+        padding: 15px 25px;
+        border-radius: 12px;
+        border: none;
+        background: linear-gradient(90deg,#ff2a68,#ff497f);
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+      }
+      button:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+      }
+      #log {
+        margin: 20px auto;
+        background: rgba(0,0,0,0.6);
+        width: 90%;
+        max-width: 1200px;
+        height: 300px;
+        padding: 15px;
+        border-radius: 15px;
+        overflow-y: auto;
+        font-family: monospace;
+        font-size: 14px;
+        box-shadow: 0 0 20px rgba(0,0,0,0.5);
+      }
+    </style>
+  </head>
+  <body>
+    <header>⚡ Cyberland Premium Dashboard ⚡</header>
+    <div class="btn-container">
+      <button onclick="toggleAI()">🤖 Toggle AI</button>
+      <button onclick="announce()">📢 Announcement</button>
+      <button onclick="clearChannel()">🧹 Clear Channel</button>
+      <button onclick="startUpdate()">⏳ Start Update</button>
+      <button onclick="finishUpdate()">✅ Finish Update</button>
+      <button onclick="botInfo()">📊 Bot Info</button>
+    </div>
+    <div id="log"></div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const s = io();
+      s.on('msg', m => {
+        const l = document.getElementById('log');
+        l.innerHTML += '<div>' + new Date().toLocaleTimeString() + ' - ' + m + '</div>';
+        l.scrollTop = l.scrollHeight;
+      });
+      function toggleAI(){s.emit('toggleAI');}
+      function announce(){const t=prompt("Title?"); const c=prompt("Content?"); const r=prompt("Reason?"); s.emit("announce",{title:t,content:c,reason:r});}
+      function clearChannel(){s.emit("clearChannel");}
+      function startUpdate(){const r=prompt("Reason?"); const m=prompt("Minutes?","5"); s.emit("startUpdate",{reason:r,minutes:Number(m)});}
+      function finishUpdate(){s.emit("finishUpdate");}
+      function botInfo(){s.emit("botInfo");}
+    </script>
+  </body>
   </html>
   `);
 });
+
 
 // ========= SOCKET.IO =========
 io.on("connection", (socket) => {
@@ -275,3 +373,4 @@ cron.schedule("0 15 * * *", async () => { // 15:00 BD time
 // ========= START =========
 client.login(TOKEN);
 server.listen(3000, ()=>console.log("🌐 Dashboard running on port 3000"));
+
