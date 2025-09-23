@@ -15,8 +15,8 @@ const OpenAI = require("openai");
 // ================================================================
 // Config
 // ================================================================
-const TOKEN = "YOUR_DISCORD_BOT_TOKEN"; // put bot token
-const OPENAI_KEY = "YOUR_OPENAI_API_KEY"; // put openai key
+const TOKEN = process.env.TOKEN;
+const OPENAI_KEY = process.env.OPENAI_KEY;
 const ADMINS = ["zihuu", "shahin", "mainuddin"];
 const ADMIN_PASS = "cyberlandai90x90x90";
 
@@ -232,3 +232,4 @@ setInterval(() => {
 // ================================================================
 server.listen(PORT, () => console.log("Dashboard running on http://localhost:" + PORT));
 client.login(TOKEN);
+
