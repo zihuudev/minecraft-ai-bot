@@ -43,11 +43,12 @@ app.get("/", (req, res) => {
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
       body{margin:0;font-family:'Roboto',sans-serif;background:linear-gradient(135deg,#8e2de2,#4a00e0);display:flex;align-items:center;justify-content:center;height:100vh;color:#fff;}
-      .login-box{background:rgba(0,0,0,0.6);padding:40px;border-radius:15px;box-shadow:0 0 20px rgba(0,0,0,0.5);}
+      .login-box{background:rgba(0,0,0,0.6);padding:40px;border-radius:15px;box-shadow:0 0 20px rgba(0,0,0,0.5);animation:fadeIn 1s;}
       input{width:100%;padding:12px;margin:10px 0;border:none;border-radius:10px;}
       button{width:100%;padding:12px;background:linear-gradient(to right,#ff416c,#ff4b2b);border:none;color:#fff;font-weight:bold;border-radius:10px;cursor:pointer;transition:0.3s;}
       button:hover{opacity:0.8;}
-      h1{margin-bottom:20px;text-shadow: 2px 2px 10px #000;}
+      h1{margin-bottom:20px;text-shadow: 2px 2px 10px #000;text-align:center;}
+      @keyframes fadeIn{0%{opacity:0}100%{opacity:1}}
     </style>
   </head>
   <body>
@@ -84,10 +85,10 @@ app.get("/dashboard", (req,res)=>{
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
       body{margin:0;font-family:'Roboto',sans-serif;background:linear-gradient(135deg,#00c6ff,#0072ff);color:#fff;padding:20px;}
-      h1{text-align:center;text-shadow:2px 2px 10px #000;}
-      button{margin:10px;padding:15px 25px;border:none;border-radius:12px;background:linear-gradient(45deg,#ff416c,#ff4b2b);color:#fff;font-weight:bold;cursor:pointer;transition:0.3s;font-size:16px;}
-      button:hover{opacity:0.8;}
-      #log{margin-top:20px;background:rgba(0,0,0,0.6);padding:15px;height:300px;overflow:auto;border-radius:15px;}
+      h1{text-align:center;text-shadow:2px 2px 10px #000;margin-bottom:40px;}
+      button{margin:10px;padding:15px 25px;border:none;border-radius:12px;background:linear-gradient(45deg,#ff416c,#ff4b2b);color:#fff;font-weight:bold;cursor:pointer;transition:0.3s;font-size:16px;box-shadow:0 5px 15px rgba(0,0,0,0.3);}
+      button:hover{opacity:0.9;transform:translateY(-2px);}
+      #log{margin-top:20px;background:rgba(0,0,0,0.6);padding:15px;height:300px;overflow:auto;border-radius:15px;box-shadow:0 5px 15px rgba(0,0,0,0.3);}
     </style>
   </head>
   <body>
@@ -164,7 +165,7 @@ io.on("connection",(socket)=>{
     try{
       // Lock channel
       await channel.permissionOverwrites.edit(channel.guild.roles.everyone, {SendMessages:false});
-      // Delete first messages
+      // Delete old messages
       const msgs = await channel.messages.fetch({limit:100});
       await channel.bulkDelete(msgs);
       // Send update embed
@@ -178,10 +179,8 @@ io.on("connection",(socket)=>{
         ).setColor("Orange").setTimestamp();
       channel.send({embeds:[embed]});
       socket.emit("msg",`⏳ Update started for ${data.minutes} minute(s)!`);
-      // Auto finish
+      // Auto finish after given minutes
       setTimeout(async ()=>{
-        // Unlock channel
-        await channel.permissionOverwrites.edit(channel.guild.roles.everyone, {SendMessages:true});
         const finishEmbed = new EmbedBuilder()
           .setTitle("✅ Update Finished ✅")
           .setDescription(`The bot has finished updating.`)
@@ -191,6 +190,8 @@ io.on("connection",(socket)=>{
             {name:"Developed By", value:"✨ **ZIHUU** ✨", inline:true}
           ).setColor("Green").setTimestamp();
         channel.send({embeds:[finishEmbed]});
+        // Unlock channel
+        await channel.permissionOverwrites.edit(channel.guild.roles.everyone, {SendMessages:true});
         updateInProgress = false;
         socket.emit("msg","✅ Update finished and channel unlocked!");
       }, data.minutes*60*1000);
@@ -204,8 +205,6 @@ io.on("connection",(socket)=>{
   socket.on("finishUpdate", async ()=>{
     const channel = await client.channels.fetch(FIXED_CHANNEL_ID);
     if(!channel) return;
-    // Unlock channel
-    await channel.permissionOverwrites.edit(channel.guild.roles.everyone, {SendMessages:true});
     const finishEmbed = new EmbedBuilder()
       .setTitle("✅ Update Finished ✅")
       .setDescription(`The bot update has been manually finished.`)
@@ -214,6 +213,8 @@ io.on("connection",(socket)=>{
         {name:"Developed By", value:"✨ **ZIHUU** ✨", inline:true}
       ).setColor("Green").setTimestamp();
     channel.send({embeds:[finishEmbed]});
+    // Unlock channel
+    await channel.permissionOverwrites.edit(channel.guild.roles.everyone, {SendMessages:true});
     updateInProgress=false;
     socket.emit("msg","✅ Update manually finished and channel unlocked!");
   });
