@@ -82,6 +82,7 @@ app.get("/dashboard", (req, res) => {
       function announce(){const t=prompt("Title?");const c=prompt("Content?");const r=prompt("Reason?");s.emit("announce",{title:t,content:c,reason:r});}
       function clearChannel(){s.emit("clearChannel");}
       function botInfo(){s.emit("botInfo");}
+      function update(){s.emit("update");}
     </script>
   </body></html>
   `);
@@ -175,4 +176,5 @@ client.on("messageCreate", async (msg) => {
 // ========= START =========
 client.login(TOKEN);
 server.listen(3000, ()=>console.log("🌐 Dashboard running on port 3000"));
+
 
