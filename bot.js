@@ -1,6 +1,6 @@
 // ============================================================
 // Cyberland Ultra Premium Discord Bot + Dashboard
-// Author: Zihuu
+// Author: Developed by ZIHUU
 // ============================================================
 
 require("dotenv").config();
@@ -11,6 +11,8 @@ const http = require("http");
 const { Server } = require("socket.io");
 const fs = require("fs");
 const path = require("path");
+const cron = require("node-cron");
+const chalk = require("chalk");
 const {
   Client,
   GatewayIntentBits,
@@ -103,11 +105,11 @@ app.use(session({ secret: SESSION_SECRET, resave: false, saveUninitialized: true
 app.get("/login", (req, res) => {
   res.send(`
   <html><body style="background:#0f172a;color:white;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh">
-  <form method="POST" action="/login" style="background:#1e293b;padding:20px;border-radius:12px">
-    <h2>Cyberland Dashboard</h2>
-    <input name="username" placeholder="Username" style="margin:5px;padding:5px" /><br>
-    <input type="password" name="password" placeholder="Password" style="margin:5px;padding:5px" /><br>
-    <button type="submit">Login</button>
+  <form method="POST" action="/login" style="background:#1e293b;padding:20px;border-radius:12px;box-shadow:0 0 15px #38bdf8">
+    <h2 style="color:#38bdf8">🚀 Cyberland Dashboard</h2>
+    <input name="username" placeholder="Username" style="margin:5px;padding:5px;border-radius:6px" /><br>
+    <input type="password" name="password" placeholder="Password" style="margin:5px;padding:5px;border-radius:6px" /><br>
+    <button type="submit" style="background:#38bdf8;color:black;padding:8px 12px;border:none;border-radius:8px">Login</button>
   </form></body></html>`);
 });
 
@@ -139,8 +141,8 @@ if (!fs.existsSync(DASHBOARD_HTML)) {
     DASHBOARD_HTML,
     `<!doctype html><html><head><title>Dashboard</title><script src="/socket.io/socket.io.js"></script></head>
     <body style="background:#111;color:white;font-family:sans-serif;padding:20px">
-    <h1>Cyberland Dashboard</h1>
-    <a href="/logout">Logout</a><br><br>
+    <h1 style="color:#38bdf8">🚀 Cyberland Dashboard</h1>
+    <a href="/logout" style="color:#f87171">Logout</a><br><br>
     <button onclick="setChannel()">Set Channel</button>
     <button onclick="toggleAI()">Toggle AI</button>
     <button onclick="lock()">Lock</button>
@@ -148,7 +150,9 @@ if (!fs.existsSync(DASHBOARD_HTML)) {
     <button onclick="purge()">Purge</button>
     <button onclick="announce()">Announce</button>
     <button onclick="botInfo()">Bot Info</button>
-    <pre id="log"></pre>
+    <button onclick="startUpdate()">Start Update</button>
+    <button onclick="finishUpdate()">Finish Update</button>
+    <pre id="log" style="background:#0f172a;padding:10px;border-radius:8px;margin-top:10px"></pre>
     <script>
       const s = io();
       s.on("msg",m=>{document.getElementById("log").innerText+=m+"\\n"});
@@ -159,26 +163,28 @@ if (!fs.existsSync(DASHBOARD_HTML)) {
       function purge(){s.emit("purge")}
       function announce(){s.emit("announce",{t:prompt("Title"),c:prompt("Content"),r:prompt("Reason")})}
       function botInfo(){s.emit("botInfo")}
+      function startUpdate(){s.emit("startUpdate")}
+      function finishUpdate(){s.emit("finishUpdate")}
     </script></body></html>`
   );
 }
 
 // ---------------- SOCKET EVENTS ----------------
 io.on("connection", (socket) => {
-  console.log("✅ Dashboard connected");
+  log("Dashboard connected", "info");
   socket.emit("msg", "Connected to dashboard");
 
   socket.on("setChannel", (id) => {
     settings.channelId = id;
     saveSettings();
-    console.log("Channel set:", id);
+    log("Channel set: " + id, "success");
     socket.emit("msg", `Channel set: ${id}`);
   });
 
   socket.on("toggleAI", () => {
     settings.aiEnabled = !settings.aiEnabled;
     saveSettings();
-    console.log("AI toggled:", settings.aiEnabled);
+    log("AI toggled: " + settings.aiEnabled, "success");
     socket.emit("msg", `AI: ${settings.aiEnabled}`);
   });
 
@@ -186,8 +192,8 @@ io.on("connection", (socket) => {
     if (!settings.channelId) return;
     const ch = await client.channels.fetch(settings.channelId);
     await ch.permissionOverwrites.edit(ch.guild.roles.everyone, { SendMessages: false });
-    await ch.send({ embeds: [makeEmbed("Channel Locked", "Indefinite")], allowedMentions: { parse: [] } });
-    console.log("Channel locked");
+    await ch.send({ embeds: [makeEmbed("🔒 Channel Locked", "Indefinite")], allowedMentions: { parse: [] } });
+    log("Channel locked", "warn");
     socket.emit("msg", "Channel locked");
   });
 
@@ -195,8 +201,8 @@ io.on("connection", (socket) => {
     if (!settings.channelId) return;
     const ch = await client.channels.fetch(settings.channelId);
     await ch.permissionOverwrites.edit(ch.guild.roles.everyone, { SendMessages: true });
-    await ch.send({ embeds: [makeEmbed("Channel Unlocked")], allowedMentions: { parse: [] } });
-    console.log("Channel unlocked");
+    await ch.send({ embeds: [makeEmbed("🔓 Channel Unlocked")], allowedMentions: { parse: [] } });
+    log("Channel unlocked", "success");
     socket.emit("msg", "Channel unlocked");
   });
 
@@ -205,8 +211,8 @@ io.on("connection", (socket) => {
     const ch = await client.channels.fetch(settings.channelId);
     const msgs = await ch.messages.fetch({ limit: 50 });
     await ch.bulkDelete(msgs, true);
-    await ch.send({ embeds: [makeEmbed("Messages Purged", "Instant")] });
-    console.log("Purged messages:", msgs.size);
+    await ch.send({ embeds: [makeEmbed("🧹 Messages Purged", "Instant")] });
+    log("Purged " + msgs.size + " messages", "warn");
     socket.emit("msg", `Purged ${msgs.size} messages`);
   });
 
@@ -214,29 +220,69 @@ io.on("connection", (socket) => {
     if (!settings.channelId) return;
     const ch = await client.channels.fetch(settings.channelId);
     await ch.send({ embeds: [makeEmbed(d.r || "No reason", "Instant").setTitle(d.t).setDescription(d.c)] });
-    console.log("Announcement sent:", d.t);
+    log("Announcement sent: " + d.t, "info");
     socket.emit("msg", "Announcement sent");
   });
 
   socket.on("botInfo", () => {
     const info = `Bot: ${client.user?.tag}\nPing: ${client.ws.ping}ms\nGuilds: ${client.guilds.cache.size}`;
-    console.log("Bot info requested");
+    log("Bot info requested", "info");
     socket.emit("msg", info);
+  });
+
+  socket.on("startUpdate", async () => {
+    if (!settings.channelId) return;
+    const ch = await client.channels.fetch(settings.channelId);
+    await ch.send({ embeds: [makeEmbed("⚡ Update Started", "5 minutes")] });
+    log("Update started manually", "warn");
+    socket.emit("msg", "Update started");
+  });
+
+  socket.on("finishUpdate", async () => {
+    if (!settings.channelId) return;
+    const ch = await client.channels.fetch(settings.channelId);
+    await ch.send({ embeds: [makeEmbed("✅ Update Finished", "5 minutes")] });
+    log("Update finished manually", "success");
+    socket.emit("msg", "Update finished");
   });
 });
 
+// ---------------- AUTO UPDATE (BD TIME) ----------------
+function scheduleUpdates() {
+  cron.schedule("0 11 * * *", () => autoUpdate("⚡ Daily Update Started (11:00)", "5 minutes"), { timezone: "Asia/Dhaka" });
+  cron.schedule("5 11 * * *", () => autoUpdate("✅ Daily Update Finished (11:05)", "5 minutes"), { timezone: "Asia/Dhaka" });
+  cron.schedule("0 15 * * *", () => autoUpdate("⚡ Daily Update Started (15:00)", "5 minutes"), { timezone: "Asia/Dhaka" });
+  cron.schedule("5 15 * * *", () => autoUpdate("✅ Daily Update Finished (15:05)", "5 minutes"), { timezone: "Asia/Dhaka" });
+}
+async function autoUpdate(reason, duration) {
+  if (!settings.channelId) return;
+  const ch = await client.channels.fetch(settings.channelId);
+  await ch.send({ embeds: [makeEmbed(reason, duration)] });
+  log(reason, "info");
+}
+
+// ---------------- PREMIUM LOG ----------------
+function log(msg, type = "info") {
+  const time = new Date().toLocaleTimeString();
+  if (type === "success") console.log(chalk.green(`[${time}] [SUCCESS] ${msg}`));
+  else if (type === "warn") console.log(chalk.yellow(`[${time}] [WARN] ${msg}`));
+  else if (type === "error") console.log(chalk.red(`[${time}] [ERROR] ${msg}`));
+  else console.log(chalk.cyan(`[${time}] [INFO] ${msg}`));
+}
+
 // ---------------- DISCORD EVENTS ----------------
-client.on("ready", () => console.log("🤖 Bot ready:", client.user.tag));
+client.on("ready", () => log("Bot ready: " + client.user.tag, "success"));
 
 client.on("messageCreate", async (msg) => {
   if (msg.author.bot) return;
   if (!settings.aiEnabled) return;
   if (!settings.channelId || msg.channel.id !== settings.channelId) return;
   const reply = await askAI(msg.content);
-  console.log("AI Reply to", msg.author.username, ":", reply);
+  log("AI Reply to " + msg.author.username + ": " + reply, "info");
   msg.reply({ content: reply, allowedMentions: { parse: [] } });
 });
 
 // ---------------- START ----------------
-server.listen(PORT, () => console.log("🌐 Dashboard running on port", PORT));
+server.listen(PORT, () => log("Dashboard running on port " + PORT, "success"));
 if (DISCORD_TOKEN) client.login(DISCORD_TOKEN);
+scheduleUpdates();
