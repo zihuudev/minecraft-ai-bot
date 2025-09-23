@@ -1,5 +1,4 @@
-// Cyberland Ultra-Premium All-in-One bot.js
-// ==========================================
+
 
 const express = require("express");
 const http = require("http");
@@ -13,15 +12,17 @@ const OpenAI = require("openai");
 const TOKEN = process.env.TOKEN;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 const ADMINS = ["zihuu", "shahin", "mainuddin"];
-const ADMIN_PASS = "cyberlandai90x90x90"; // password ekhanei thakbe
+const ADMIN_PASS = "cyberlandai90x90x90";
 const FIXED_CHANNEL_ID = "1419702204171813015";
 
 // ========= DISCORD CLIENT =========
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
+
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
 let aiEnabled = true;
+let isUpdating = false;
 
 // ========= EXPRESS DASHBOARD =========
 const app = express();
@@ -31,22 +32,26 @@ const io = new Server(server);
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: "cyberland_secret", resave: false, saveUninitialized: true }));
 
-// login
+// Login Page
 app.get("/", (req, res) => {
   if (req.session.user) return res.redirect("/dashboard");
   res.send(`
-  <html><head><title>Cyberland Login</title></head>
-  <body style="background:linear-gradient(135deg,#1f1f1f,#0f0f0f);color:#fff;text-align:center;padding:50px;font-family:sans-serif;">
+  <html><head><title>Cyberland Login</title>
+  <style>
+    body {background:#0f0f0f;color:#fff;font-family:sans-serif;text-align:center;padding:50px;}
+    input{padding:10px;margin:5px;border-radius:8px;}
+    button{padding:10px 20px;border:none;border-radius:8px;background:purple;color:#fff;font-weight:bold;cursor:pointer;}
+  </style></head>
+  <body>
   <h1>🔐 Cyberland Bot Login</h1>
   <form method="POST" action="/login">
-    <input style="padding:10px;margin:5px;border-radius:8px;" name="username" placeholder="Username" required><br>
-    <input type="password" style="padding:10px;margin:5px;border-radius:8px;" name="password" placeholder="Password" required><br>
-    <button style="padding:10px 20px;border:none;border-radius:8px;background:linear-gradient(45deg,#6a0dad,#9b30ff);color:#fff;font-weight:bold;">Login</button>
+    <input name="username" placeholder="Username" required><br>
+    <input type="password" name="password" placeholder="Password" required><br>
+    <button>Login</button>
   </form></body></html>
   `);
 });
 
-// login post
 app.post("/login", (req, res) => {
   const { username, password } = req.body;
   if (ADMINS.includes(username) && password === ADMIN_PASS) {
@@ -57,44 +62,45 @@ app.post("/login", (req, res) => {
   }
 });
 
-// dashboard
+// Dashboard Page
 app.get("/dashboard", (req, res) => {
   if (!req.session.user) return res.redirect("/");
   res.send(`
-  <html><head><title>Cyberland Dashboard</title></head>
-  <body style="background:linear-gradient(135deg,#1f1f1f,#0f0f0f);color:#fff;font-family:'Segoe UI',sans-serif;padding:30px;text-align:center;">
-    <h1>⚡ Cyberland Dashboard ⚡</h1>
+  <html><head><title>Cyberland Dashboard</title>
+  <style>
+    body{background:#111;color:#fff;font-family:sans-serif;padding:30px;}
+    h1{animation: glow 1.5s infinite alternate;text-align:center;}
+    @keyframes glow{0%{text-shadow:0 0 5px #f0f;}100%{text-shadow:0 0 20px #ff0;}}
+    button{margin:5px;padding:10px 15px;border:none;border-radius:8px;background:linear-gradient(90deg,#8e2de2,#4a00e0);color:#fff;font-weight:bold;cursor:pointer;transition:0.3s;}
+    button:hover{transform:scale(1.05);}
+    #log{margin-top:20px;background:#000;padding:10px;height:250px;overflow:auto;border-radius:10px;}
+  </style>
+  </head><body>
+  <h1>⚡ Cyberland Dashboard ⚡</h1>
+  <div style="text-align:center;">
     <button onclick="toggleAI()">🤖 Toggle AI</button>
     <button onclick="announce()">📢 Announcement</button>
     <button onclick="clearChannel()">🧹 Clear Channel</button>
-    <button onclick="botInfo()">📊 Bot Info</button>
-    <button onclick="startUpdate()">⏳ Start Update</button>
+    <button onclick="startUpdate()">🚀 Start Update</button>
     <button onclick="finishUpdate()">✅ Finish Update</button>
-    <div id="log" style="margin-top:20px;background:rgba(0,0,0,0.7);padding:15px;height:300px;overflow:auto;border-radius:15px;font-family:monospace;font-size:14px;"></div>
-    <script src="/socket.io/socket.io.js"></script>
-    <script>
-      const s=io();
-      s.on('msg',m=>{
-        const l=document.getElementById('log');
-        l.innerHTML+=\`<div>\${new Date().toLocaleTimeString()} - \${m}</div>\`;
-        l.scrollTop=l.scrollHeight;
-      });
-      function toggleAI(){s.emit("toggleAI");}
-      function announce(){ 
-        const t=prompt("Title?"); 
-        const c=prompt("Content?"); 
-        const r=prompt("Reason?"); 
-        s.emit("announce",{title:t,content:c,reason:r}); 
-      }
-      function clearChannel(){ s.emit("clearChannel"); }
-      function botInfo(){ s.emit("botInfo"); }
-      function startUpdate(){
-        const r=prompt("Reason?");
-        const m=prompt("Minutes?","5");
-        s.emit("startUpdate",{reason:r,minutes:Number(m)});
-      }
-      function finishUpdate(){ s.emit("finishUpdate"); }
-    </script>
+    <button onclick="botInfo()">📊 Bot Info</button>
+  </div>
+  <div id="log"></div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const s=io();
+    s.on('msg',m=>{
+      const l=document.getElementById('log');
+      l.innerHTML+=\`<div>\${new Date().toLocaleTimeString()} - \${m}</div>\`;
+      l.scrollTop=l.scrollHeight;
+    });
+    function toggleAI(){s.emit('toggleAI');}
+    function announce(){const t=prompt("Title?");const c=prompt("Content?");const r=prompt("Reason?");s.emit("announce",{title:t,content:c,reason:r});}
+    function clearChannel(){s.emit("clearChannel");}
+    function startUpdate(){const r=prompt("Reason?"); const m=prompt("Minutes?","5"); s.emit("startUpdate",{reason:r,minutes:Number(m)});}
+    function finishUpdate(){s.emit("finishUpdate");}
+    function botInfo(){s.emit("botInfo");}
+  </script>
   </body></html>
   `);
 });
@@ -113,8 +119,8 @@ io.on("connection", (socket) => {
       .setTitle(`📢 ${data.title}`)
       .setDescription(data.content)
       .addFields(
-        { name: "Reason", value: data.reason || "No reason" },
-        { name: "Developed By", value: "🔥 ZIHUU 🔥" }
+        { name: "Reason", value: data.reason || "No reason", inline:true },
+        { name: "Developed By", value:"🔥 **ZIHUU** 🔥", inline:true }
       )
       .setColor("Purple").setTimestamp();
     channel.send({ embeds: [embed] });
@@ -132,45 +138,53 @@ io.on("connection", (socket) => {
       .addFields(
         { name: "Ping", value: client.ws.ping+"ms", inline:true },
         { name: "Server", value: channel.guild.name, inline:true },
-        { name: "Developer", value:"✨ ZIHUU ✨", inline:true }
+        { name: "Developed By", value:"✨ **ZIHUU** ✨", inline:true }
       )
       .setColor("Gold").setTimestamp();
     channel.send({ embeds: [embed] });
     socket.emit("msg","🧹 Channel cleared & embed sent!");
   });
 
-  socket.on("botInfo", () => {
-    socket.emit("msg", `Bot Ping: ${client.ws.ping}ms`);
-  });
-
   socket.on("startUpdate", async (data) => {
+    if(isUpdating) return socket.emit("msg","⚠️ Update already running!");
+    isUpdating = true;
     const channel = await client.channels.fetch(FIXED_CHANNEL_ID);
     if(!channel) return;
+    const msgs = await channel.messages.fetch({ limit: 100 });
+    await channel.bulkDelete(msgs);
     const embed = new EmbedBuilder()
-      .setTitle(`⏳ Update Started`)
+      .setTitle("🚀 Update Started 🚀")
+      .setDescription(`Update Reason: ${data.reason}\nDuration: ${data.minutes} min`)
       .addFields(
-        { name: "Reason", value: data.reason || "No reason", inline:true },
-        { name: "Duration", value: data.minutes+" minutes", inline:true },
-        { name: "Ping", value: client.ws.ping+"ms", inline:true },
-        { name: "Developer", value: "🔥 ZIHUU 🔥", inline:true }
+        { name:"Bot Ping", value:client.ws.ping+"ms", inline:true },
+        { name:"Server", value:channel.guild.name, inline:true },
+        { name:"Developed By", value:"🔥 ZIHUU 🔥", inline:true }
       )
       .setColor("Blue").setTimestamp();
-    channel.send({embeds:[embed]});
-    socket.emit("msg","⏳ Update started & embed sent!");
+    channel.send({ embeds:[embed] });
+    socket.emit("msg",`✅ Update started for ${data.minutes} min`);
   });
 
   socket.on("finishUpdate", async () => {
+    if(!isUpdating) return socket.emit("msg","⚠️ No active update!");
+    isUpdating = false;
     const channel = await client.channels.fetch(FIXED_CHANNEL_ID);
     if(!channel) return;
     const embed = new EmbedBuilder()
-      .setTitle(`✅ Update Finished`)
+      .setTitle("✅ Update Finished ✅")
+      .setDescription("Update has been successfully completed!")
       .addFields(
-        { name: "Ping", value: client.ws.ping+"ms", inline:true },
-        { name: "Developer", value:"✨ ZIHUU ✨", inline:true }
+        { name:"Bot Ping", value:client.ws.ping+"ms", inline:true },
+        { name:"Server", value:channel.guild.name, inline:true },
+        { name:"Developed By", value:"🔥 ZIHUU 🔥", inline:true }
       )
       .setColor("Green").setTimestamp();
-    channel.send({embeds:[embed]});
-    socket.emit("msg","✅ Update finished & embed sent!");
+    channel.send({ embeds:[embed] });
+    socket.emit("msg","🎉 Update finished embed sent!");
+  });
+
+  socket.on("botInfo", () => {
+    socket.emit("msg", `Bot Ping: ${client.ws.ping}ms`);
   });
 });
 
@@ -190,21 +204,21 @@ client.on("messageCreate", async (msg) => {
         messages: [{ role: "user", content: msg.content }],
         max_tokens: 150
       });
-      if (res.choices[0]?.message?.content) {
+      if(res.choices[0]?.message?.content) {
         msg.reply(res.choices[0].message.content);
       } else msg.reply("⚠️ AI could not generate a response.");
-    } catch (err) {
+    } catch(err) {
       console.error("AI Error:", err.message);
-      msg.reply("⚠️ AI temporarily unavailable. Retrying...");
-      setTimeout(async ()=>{
+      msg.reply("⚠️ AI is temporarily unavailable. Retrying...");
+      setTimeout(async()=>{
         try{
           const retry = await openai.chat.completions.create({
             model:"gpt-4o-mini",
-            messages:[{role:"user", content: msg.content}],
+            messages:[{role:"user",content:msg.content}],
             max_tokens:150
           });
           msg.reply(retry.choices[0].message.content);
-        }catch(e){
+        } catch(e){
           msg.reply("❌ AI failed again. Try later.");
         }
       },3000);
