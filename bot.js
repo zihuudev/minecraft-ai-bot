@@ -1,6 +1,3 @@
-// Cyberland Ultra-Premium All-in-One bot.js
-// ===================================================
-
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -251,3 +248,4 @@ client.on("messageCreate", async (msg)=>{
 // ========= START =========
 client.login(TOKEN);
 server.listen(3000,()=>console.log("🌐 Dashboard running on port 3000"));
+
